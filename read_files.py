@@ -1,19 +1,38 @@
 from utils import *
 from basis import *
+import re
 
-class MoldenWavefunction:
-    def __init__(self, fp:str):
-        self.n_atom = 0
-        self.elems = []
+
+class Molecule:
+    def __init__(self, elems, coords, bonds = []):
+        self.elems = elems
+        self.coords = np.array(coords, dtype = np.float32)
+        self.n_atom = len(elems)
+
+        if len(bonds) == 0 and self.n_atom > 1:
+            self.form_bonds()
+        else:
+            self.bonds = bonds
+            self.bondpts = np.array([[self.coords[bond[0]], self.coords[bond[1]]] for bond in bonds])
+
+    def form_bonds(self):
         self.bonds = []
         self.bondpts = []
-        self.coords = []
-        self.elemlabel = {1: 'H', 30: 'Zn', 63: 'Eu', 2: 'He', 31: 'Ga', 64: 'Gd', 3: 'Li', 32: 'Ge', 65: 'Tb', 4: 'Be', 33: 'As', 66: 'Dy', 5: 'B', 34: 'Se', 67: 'Ho', 6: 'C', 35: 'Br', 68: 'Er', 36: 'Kr', 69: 'Tm', 37: 'Rb', 70: 'Yb', 7: 'N', 38: 'Sr', 71: 'Lu', 8: 'O', 39: 'Y', 72: 'Hf', 9: 'F', 40: 'Zr', 73: 'Ta', 10: 'Ne', 41: 'Nb', 74: 'W', 11: 'Na', 42: 'Mo', 75: 'Re', 12: 'Mg', 43: 'Tc', 76: 'Os', 13: 'Al', 44: 'Ru', 77: 'Ir', 14: 'Si', 45: 'Rh', 78: 'Pt', 15: 'P', 46: 'Pd', 79: 'Au', 16: 'S', 47: 'Ag', 80: 'Hg', 17: 'Cl', 48: 'Cd', 81: 'Tl', 18: 'Ar', 49: 'In', 82: 'Pb', 19: 'K', 50: 'Sn', 83: 'Bi', 20: 'Ca', 51: 'Sb', 84: 'Po', 21: 'Sc', 52: 'Te', 85: 'At', 22: 'Ti', 53: 'I', 86: 'Rn', 23: 'V', 54: 'Xe', 87: 'Fr', 24: 'Cr', 55: 'Cs', 88: 'Ra', 25: 'Mn', 56: 'Ba', 89: 'Ac', 57: 'La', 90: 'Th', 26: 'Fe', 58: 'Ce', 91: 'Pa', 59: 'Pr', 92: 'U', 27: 'Co', 60: 'Nd', 93: 'Np', 61: 'Pm', 94: 'Pu', 28: 'Ni', 62: 'Sm', 95: 'Am', 29: 'Cu', 96: 'Cm'}
-        self.elemradius = {1: 0.50, 30: 1.22, 63: 1.98, 2: 0.28, 31: 1.22, 64: 1.96, 3: 1.28, 32: 1.2, 65: 1.94, 4: 0.96, 33: 1.19, 66: 1.92, 5: 0.84, 34: 1.2, 67: 1.92, 6: 0.76, 35: 1.2, 68: 1.89, 36: 1.16, 69: 1.9, 37: 2.2, 70: 1.87, 7: 0.71, 38: 1.95, 71: 1.87, 8: 0.66, 39: 1.9, 72: 1.75, 9: 0.57, 40: 1.75, 73: 1.7, 10: 0.58, 41: 1.64, 74: 1.62, 11: 1.66, 42: 1.54, 75: 1.51, 12: 1.41, 43: 1.47, 76: 1.44, 13: 1.21, 44: 1.46, 77: 1.41, 14: 1.11, 45: 1.42, 78: 1.36, 15: 1.07, 46: 1.39, 79: 1.36, 16: 1.05, 47: 1.45, 80: 1.32, 17: 1.02, 48: 1.44, 81: 1.45, 18: 1.06, 49: 1.42, 82: 1.46, 19: 2.03, 50: 1.39, 83: 1.48, 20: 1.76, 51: 1.39, 84: 1.4, 21: 1.7, 52: 1.38, 85: 1.5, 22: 1.6, 53: 1.39, 86: 1.5, 23: 1.53, 54: 1.4, 87: 2.6, 24: 1.39, 55: 2.44, 88: 2.21, 25: 1.39, 56: 2.15, 89: 2.15, 57: 2.07, 90: 2.06, 26: 1.32, 58: 2.04, 91: 2.0, 59: 2.03, 92: 1.96, 27: 1.26, 60: 2.01, 93: 1.9, 61: 1.99, 94: 1.87, 28: 1.24, 62: 1.98, 95: 1.8, 29: 1.32, 96: 1.69}
-        self.elemradius = {self.elemlabel[i]: self.elemradius[i] for i in self.elemlabel}
+        for i in range(self.n_atom-1):
+            for j in range(i+1, self.n_atom):
+                l = np.linalg.norm(self.coords[i] - self.coords[j])**0.5
+                if l <= 1.0:#1.0 * (elemradius[self.elems[i]] + elemradius[self.elems[j]]):
+                    self.bonds.append((i, j))
+                    self.bondpts.append([self.coords[i], self.coords[j]])
+        self.bondpts = np.array(self.bondpts)
+    
+class MoldenWavefunction:
+    def __init__(self, fp:str):
+
         self.logger = MyLogger()
         self.logger.log(f"Load wavefunction {fp}.")
 
+        self.molecule = None
         self.gtoshells = []
         self.gtos = []
         self.C = []
@@ -23,22 +42,13 @@ class MoldenWavefunction:
         self.homo = -1
         self.lumo = -1
 
-        self.temp = None
+        self.temp = None    # temp data for storing the raveled GTF array
         self.convert_mats = {"s":S_convert, "p":P_convert, "d":D_convert, "f":F_convert, "g":G_convert, "h":np.eye(21, dtype = np.float32)}
 
         self.read(fp)
-        self.form_bonds()
         self.convert_to_cartesian()
+        self.find_frontier()
         self.ravel_gtoshells()
-
-    def form_bonds(self):
-        for i in range(self.n_atom-1):
-            for j in range(i+1, self.n_atom):
-                l = np.linalg.norm(self.coords[i] - self.coords[j])**0.5
-                if l <= 1.0 * (self.elemradius[self.elems[i]] + self.elemradius[self.elems[j]]):
-                    self.bonds.append((i, j))
-                    self.bondpts.append([self.coords[i], self.coords[j]])
-        self.bondpts = np.array(self.bondpts)
 
     def find_frontier(self):
         homo, lumo = -1, -1
@@ -131,6 +141,7 @@ class MoldenWavefunction:
 
     def read(self, fp:str):
         self.logger.log(fp)
+        elems, coords = [], []
         with open(fp, "r", errors="ignore") as f:
             n_orb, n_coeff, N_coeff = 0, 0, 0
             section, i = "", 0
@@ -149,8 +160,8 @@ class MoldenWavefunction:
                 elif section == "[Atoms]":
                     elem, atmid, atmwt = data[0], int(data[1]), int(data[2])
                     x, y, z = float(data[3]), float(data[4]), float(data[5])
-                    self.coords.append([x, y, z])
-                    self.elems.append(elem)
+                    coords.append([x, y, z])
+                    elems.append(elem)
 
                 elif section == "[GTO]":
                     if len(data) != 2 or data[0].find(".") != -1:
@@ -168,7 +179,7 @@ class MoldenWavefunction:
                             tmp = f.readline().split()[:2]
                             contracts[k] = float(tmp[0])
                             coefficients[k] = float(tmp[1])
-                        self.gtoshells.append(GTOShell(slb, contracts, coefficients, self.coords[atmidx-1], atmidx))
+                        self.gtoshells.append(GTOShell(slb, contracts, coefficients, coords[atmidx-1], atmidx))
                         j += ngto + 1
 
                 if section == "[MO]":
@@ -226,25 +237,16 @@ class MoldenWavefunction:
         elif n_energy < n_coeffs:
             self.C = np.concatenate((self.C, np.zeros((n_coeffs - n_energy, n_coeffs))), axis = 0)
         n, n = self.C.shape
-        self.n_atom = len(self.coords)
-        self.coords = np.array(self.coords)
+        self.molecule = Molecule(elems, coords)
         self.energys = np.array(self.energys[:n])
         self.occupys = np.array(self.occupys[:n])
         self.spins = np.array(self.spins[:n])
-        self.logger.log(f"Total {len(self.elems)} atom detected.")
+        self.logger.log(f"Total {self.molecule.n_atom} atom detected.")
         self.logger.log(f"Total {len(self.energys)} orbitals detected.")
 
-
 class GaussianCube:
-    def __init__(self, fp = None):
-        self.n_atom = 0
-        self.elems = []
-        self.bonds = []
-        self.bondpts = []
-        self.coords = None
-        self.elemlabel = {1: 'H', 30: 'Zn', 63: 'Eu', 2: 'He', 31: 'Ga', 64: 'Gd', 3: 'Li', 32: 'Ge', 65: 'Tb', 4: 'Be', 33: 'As', 66: 'Dy', 5: 'B', 34: 'Se', 67: 'Ho', 6: 'C', 35: 'Br', 68: 'Er', 36: 'Kr', 69: 'Tm', 37: 'Rb', 70: 'Yb', 7: 'N', 38: 'Sr', 71: 'Lu', 8: 'O', 39: 'Y', 72: 'Hf', 9: 'F', 40: 'Zr', 73: 'Ta', 10: 'Ne', 41: 'Nb', 74: 'W', 11: 'Na', 42: 'Mo', 75: 'Re', 12: 'Mg', 43: 'Tc', 76: 'Os', 13: 'Al', 44: 'Ru', 77: 'Ir', 14: 'Si', 45: 'Rh', 78: 'Pt', 15: 'P', 46: 'Pd', 79: 'Au', 16: 'S', 47: 'Ag', 80: 'Hg', 17: 'Cl', 48: 'Cd', 81: 'Tl', 18: 'Ar', 49: 'In', 82: 'Pb', 19: 'K', 50: 'Sn', 83: 'Bi', 20: 'Ca', 51: 'Sb', 84: 'Po', 21: 'Sc', 52: 'Te', 85: 'At', 22: 'Ti', 53: 'I', 86: 'Rn', 23: 'V', 54: 'Xe', 87: 'Fr', 24: 'Cr', 55: 'Cs', 88: 'Ra', 25: 'Mn', 56: 'Ba', 89: 'Ac', 57: 'La', 90: 'Th', 26: 'Fe', 58: 'Ce', 91: 'Pa', 59: 'Pr', 92: 'U', 27: 'Co', 60: 'Nd', 93: 'Np', 61: 'Pm', 94: 'Pu', 28: 'Ni', 62: 'Sm', 95: 'Am', 29: 'Cu', 96: 'Cm'}
-        self.elemradius = {1: 0.50, 30: 1.22, 63: 1.98, 2: 0.28, 31: 1.22, 64: 1.96, 3: 1.28, 32: 1.2, 65: 1.94, 4: 0.96, 33: 1.19, 66: 1.92, 5: 0.84, 34: 1.2, 67: 1.92, 6: 0.76, 35: 1.2, 68: 1.89, 36: 1.16, 69: 1.9, 37: 2.2, 70: 1.87, 7: 0.71, 38: 1.95, 71: 1.87, 8: 0.66, 39: 1.9, 72: 1.75, 9: 0.57, 40: 1.75, 73: 1.7, 10: 0.58, 41: 1.64, 74: 1.62, 11: 1.66, 42: 1.54, 75: 1.51, 12: 1.41, 43: 1.47, 76: 1.44, 13: 1.21, 44: 1.46, 77: 1.41, 14: 1.11, 45: 1.42, 78: 1.36, 15: 1.07, 46: 1.39, 79: 1.36, 16: 1.05, 47: 1.45, 80: 1.32, 17: 1.02, 48: 1.44, 81: 1.45, 18: 1.06, 49: 1.42, 82: 1.46, 19: 2.03, 50: 1.39, 83: 1.48, 20: 1.76, 51: 1.39, 84: 1.4, 21: 1.7, 52: 1.38, 85: 1.5, 22: 1.6, 53: 1.39, 86: 1.5, 23: 1.53, 54: 1.4, 87: 2.6, 24: 1.39, 55: 2.44, 88: 2.21, 25: 1.39, 56: 2.15, 89: 2.15, 57: 2.07, 90: 2.06, 26: 1.32, 58: 2.04, 91: 2.0, 59: 2.03, 92: 1.96, 27: 1.26, 60: 2.01, 93: 1.9, 61: 1.99, 94: 1.87, 28: 1.24, 62: 1.98, 95: 1.8, 29: 1.32, 96: 1.69}
-        self.elemradius = {self.elemlabel[i]: self.elemradius[i] for i in self.elemlabel}
+    def __init__(self, fp = None, data = None, molecule = None, grid_size = (0.01, 0.01, 0.01), minpos = (0.0, 0.0, 0.0)):
+        self.molecule = molecule
         self.logger = MyLogger()
         self.logger.log(f"Load gaussian cube file {fp}.")
 
@@ -262,15 +264,21 @@ class GaussianCube:
 
         if isinstance(fp, str):
             self.read_cube(fp)
-
-    def form_bonds(self):
-        for i in range(self.n_atom-1):
-            for j in range(i+1, self.n_atom):
-                l = np.linalg.norm(self.coords[i] - self.coords[j])**0.5
-                if l <= 1.2 * (self.elemradius[self.elems[i]] + self.elemradius[self.elems[j]]):
-                    self.bonds.append((i, j))
-                    self.bondpts.append([self.coords[i], self.coords[j]])
-        self.bondpts = np.array(self.bondpts)
+        elif fp == None:
+            if not isinstance(data, np.ndarray) and isinstance(molecule, Molecule):
+                raise ValueError("The grid data must be specified if there is no input grid files.")
+            self.data = data
+            self.xmin, self.ymin, self.zmin = minpos
+            self.nx, self.ny, self.nz = data.shape
+            self.dx, self.dy, self.dz = grid_size
+            self.xmax, self.ymax, self.zmax = self.xmin+self.nx*self.dx, self.ymin+self.ny*self.dy, self.zmin+self.nz*self.dz
+            if not isinstance(molecule, Molecule):
+                self.logger.log("warning: no corresponding molecule.")
+                self.molecule = Molecule([], [])
+        self.minpos = (self.xmin, self.ymin, self.zmin)
+        self.maxpos = (self.xmax, self.ymax, self.zmax)
+        self.grid_size = (self.dx, self.dy, self.dz)
+        self.shape = self.data.shape
 
     def read_block(self, f, bsize:int):
         while True:
@@ -298,6 +306,7 @@ class GaussianCube:
         self.logger.log(f"Reading finished. Total {self.data.size:d} data points loaded.")
 
     def read_cube(self, filename):
+        elems, coords = [], []
         with open(filename, "r", errors = "ignore") as f:
             iline = 1
             line = f.readline()
@@ -306,12 +315,12 @@ class GaussianCube:
                     pass
                 elif iline == 3:
                     n_atom, xmin, ymin, zmin = line.split()
-                    self.n_atom = int(n_atom)
+                    n_atom = int(n_atom)
                     self.xmin = float(xmin)
                     self.ymin = float(ymin)
                     self.zmin = float(zmin)
-                    self.coords = np.zeros((self.n_atom, 3), dtype = np.float32)
-                    self.logger.log(f"There are {self.n_atom} atoms in this molecule.")
+                    coords = np.zeros((n_atom, 3), dtype = np.float32)
+                    self.logger.log(f"There are {n_atom} atoms in this molecule.")
                 elif iline == 4:
                     xdim, dx, _, _ = line.split()
                     self.nx, self.dx = int(xdim), float(dx)
@@ -330,10 +339,10 @@ class GaussianCube:
                 else:
                     tmp = line.split()
                     if len(tmp) == 5:
-                        self.elems.append(self.elemlabel[int(tmp[0])])
-                        self.coords[iline-7] = np.array((float(tmp[2]), float(tmp[3]), float(tmp[4])), dtype = np.float32)
+                        elems.append(elemlabel[int(tmp[0])])
+                        coords[iline-7] = np.array((float(tmp[2]), float(tmp[3]), float(tmp[4])), dtype = np.float32)
                     elif len(tmp) == 6:
-                        self.form_bonds()
+                        self.molecule = Molecule(elems, coords)
                         self.read_cube_data(f, curlinestart)
                         break
                     else:
@@ -341,3 +350,94 @@ class GaussianCube:
                 curlinestart = f.tell()
                 line = f.readline()
                 iline += 1
+
+class Excitation:
+    def __init__(self):
+        self.orb1 = [1,]
+        self.orb2 = [2,]
+        self.cisc = [1.,]
+        self.osci = 1.0
+        self.trdp = 0.0
+        self.e = 1.0
+        self.wlen = 45.5640
+
+def read_cis_output(fp:str):
+    with open(fp, "r", errors="ignore") as f:
+        for i in range(100000):
+            line = f.readline()
+            if line.find("Transition dipole moments") != -1:
+                curlinestart = f.tell()
+                break
+        f.seek(curlinestart)
+        dipoledata = []
+        patt = r'(?P<ridx>\d+) +(?P<Tx>-?\d+\.\d+) +(?P<Ty>-?\d+\.\d+) +(?P<Tz>-?\d+\.\d+) +(?P<T>-?\d+\.\d+)'
+        for i in range(100):
+            line = f.readline()
+            if line.find("Transition dipole moments between excited states:") != -1:
+                curlinestart = f.tell()
+                break
+            result = re.search(patt, line)
+            if not result:
+                continue
+            result = result.groupdict()
+            dipoledata.append(float(result["T"]))
+
+        f.seek(curlinestart)
+        for i in range(1000):
+            curlinestart = f.tell()
+            line = f.readline()
+            if line.find("Largest CI coefficients") != -1:
+                break
+        f.seek(curlinestart)
+        occus, virts, coeffs = [], [], []
+        patt = r"(?P<occu>\d+) +-> +(?P<virt>\d+) +:.+ +(?P<coeff>-?\d+\.\d+)"
+        for i in range(1000):
+            curlinestart = f.tell()
+            line = f.readline()
+            if line.find("Final Excited State Results:") != -1:
+                break
+            if line.find("Largest CI coefficients") != -1:
+                occus.append([])
+                virts.append([])
+                coeffs.append([])
+            result = re.search(patt, line)
+            if not result:
+                continue
+            result = result.groupdict()
+            occus[-1].append(int(result["occu"]))
+            virts[-1].append(int(result["virt"]))
+            coeffs[-1].append(float(result["coeff"]))
+        f.seek(curlinestart)
+        eexts, oscis = [], []
+        for i in range(1000):
+            line = f.readline()
+            if not line:
+                break
+            patt = r"(?P<ridx>\d+) +(?P<tene>-?\d+\.\d+) +(?P<eext>-?\d+\.\d+) +(?P<osci>-?\d+\.\d+) +(?P<s2>-?\d+\.\d+)"
+            result = re.search(patt, line)
+            if not result:
+                continue
+            eexts.append(float(result["eext"]) / 27.21139664130791)
+            oscis.append(float(result["osci"]))
+    
+    if not (len(dipoledata) == len(occus) == len(virts) == len(coeffs) == len(eexts) == len(oscis)):
+        raise ValueError("Errors found in reading excitation info.")
+
+    excitations = []
+    for i in range(len(eexts)):
+        e = Excitation()
+        e.cisc = coeffs[i]
+        e.e = eexts[i]
+        if not (len(coeffs[i]) == len(occus[i]) == len(virts[i])):
+            raise ValueError("Errors found in reading excitation info.")
+        e.osci = oscis[i]
+        e.orb1 = occus[i]
+        e.orb2 = virts[i]
+        e.trdp = dipoledata[i]
+        e.wlen = 45.56337117 / e.e
+        excitations.append(e)
+    return excitations
+
+
+result = read_cis_output("terachem\\7-coronene-es.out")
+print(result)

@@ -276,10 +276,10 @@ class DensityViewer():
 
 if __name__ == "__main__":
     filename1 = 'moldenfiles/1-benzene.molden'
-    # filename1 = 'cubefiles/7-coronene-hh-tddft.cisdp01.cube'
+    filename1 = 'cubefiles/7-coronene-hh-tddft.cisdp01.cube'
     viewer = DensityViewer(filename1)
 
     # viewer.set_molecule()
-    viewer.get_orbital_grid(10)
+    # viewer.get_orbital_grid(10)
     viewer.set_density()
     viewer.run()
