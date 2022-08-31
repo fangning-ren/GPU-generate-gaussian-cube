@@ -1,17 +1,19 @@
 import numpy as np
 import time
-import matplotlib.pyplot as plt
 
 import vispy.plot as vplt
 from vispy import scene
 from vispy.visuals.filters import Alpha
 from vispy.color import Colormap
+from density import DensityManager
 
 from utils import *
 from basis import *
 from read_files import *
+from density import *
 
 class DensityViewer():
+    """This is the frond end"""
     def __init__(self):
         self.logger = MyLogger()
         # self.canvas = scene.SceneCanvas(keys='interactive', size=(1280, 960), show=True)
@@ -46,7 +48,7 @@ class DensityViewer():
         self.current_orbital_idx = -1
         self.current_delta_var = -1
         self.current_isosurface = -1
-        self.grid_dims = (128, 128, 128)
+        self.grid_dims = (100,100,100)
         self.grid_padding = 6.0
         self.volume = None
         self.isosurface_1 = None
@@ -55,6 +57,7 @@ class DensityViewer():
 
         self.wf = None      # loaded wave function. 
         self.cube = None    # Current cube data
+        self.dm = None      # density manager object
         
         self.keyops = {
             "W":self.move_plane_up,
@@ -83,6 +86,7 @@ class DensityViewer():
         colors = np.stack((rs, gs, bs, alphas), axis = 1)
         return Colormap(colors)
 
+    # Calculation functions
     def get_plane_data(self, ngrid = 256, clipplane = None):
         clipplane = self.clipplane if not isinstance(clipplane, np.ndarray) else clipplane
         p0, pv = self.clipplane[-1]
@@ -98,24 +102,13 @@ class DensityViewer():
         grid_dims = self.grid_dims
         if self.current_orbital_idx != orbidx:
             self.current_orbital_idx = orbidx
-        cs, cas, pos, pws = self.wf.get_raveled_gtf(self.wf.C[self.current_orbital_idx])
-        atomidxs = self.wf.get_raveled_atomidx()
 
         dist0 = self.grid_padding
         mol = self.wf.molecule
         xmin, ymin, zmin = mol.coords[:,0].min()-dist0, mol.coords[:,1].min()-dist0, mol.coords[:,2].min()-dist0
         xmax, ymax, zmax = mol.coords[:,0].max()+dist0, mol.coords[:,1].max()+dist0, mol.coords[:,2].max()+dist0
-        dx, dy, dz = (xmax - xmin) / grid_dims[0], (ymax - ymin) / grid_dims[1], (zmax - zmin) / grid_dims[2]
-        self.logger.log(f"Orbital {orbidx}. Energy = {self.wf.energys[orbidx]:>5.6f} Hartree, Occupy = {self.wf.occupys[orbidx]:>1.3f}")
-
-        t = time.time()
-        blockdim = (32, 32, 32)
-        griddim = ((self.grid_dims[0]+31)//32, (self.grid_dims[1]+31)//32, (self.grid_dims[2]+31)//32)
-        dV = cuda.device_array(grid_dims, dtype=np.float32)
-        cube_kernel_v2[blockdim, griddim](dV, xmin, ymin, zmin, dx, dy, dz, cs, cas, pos, pws, atomidxs)
-        V = dV.copy_to_host()
-        self.logger.log(f"Time for cube file generation: {time.time()-t:.3f} second.")
-        
+        dx, dy, dz = (xmax - xmin) / (grid_dims[0] - 1), (ymax - ymin) / (grid_dims[1] - 1), (zmax - zmin) / (grid_dims[2] - 1)
+        V = np.zeros(grid_dims, dtype = np.float32)
         if not isinstance(self.cube, GaussianCube) or self.cube.shape != V.shape:
             del self.cube
             self.cube = GaussianCube(
@@ -123,9 +116,33 @@ class DensityViewer():
                 molecule = mol,
                 grid_size=(dx, dy, dz),
                 minpos = (xmin, ymin, zmin))
+            if isinstance(self.dm, DensityManager):
+                self.dm.cube = self.cube
         else:
             self.cube.data = V
+        if not isinstance(self.dm, DensityManager):
+            self.dm = DensityManager(self.wf, self.cube)
 
+        self.logger.log(f"Orbital {orbidx}. Energy = {self.wf.energys[orbidx]:>5.6f} Hartree, Occupy = {self.wf.occupys[orbidx]:>1.3f}")
+        t = time.time()
+        self.cube.data = self.dm.get_orbital_value(orbidx)
+        self.logger.log(f"Time for cube file generation: {time.time()-t:.3f} second.")
+        print("Sum up all values: " + str(np.sum(self.cube.data*self.cube.data) * (self.cube.dx*self.cube.dy*self.cube.dz)))
+
+    def get_electron_density(self):
+        if not self.dm:
+            self.logger.log("No wavefunction loaded. Cannot calculate electron density.")
+            return 
+        t = time.time()
+        self.logger.log("Calculating electron density")
+        V = self.dm.get_electron_density()
+        a = np.sum(V)
+        a *= self.cube.dx*self.cube.dy*self.cube.dz
+        self.logger.log(f"Summing up all value and multiply differential element: {a}")
+        self.logger.log(f"Time cost: {time.time()-t}")
+        return V
+
+    # Initialization functions       
     def read(self, data):
         if isinstance(data, GaussianCube):
             self.cube = data
@@ -141,7 +158,7 @@ class DensityViewer():
             self.wf = None
         elif isinstance(data, str) and (data.endswith(".molden") or data.endswith(".molden.input")):
             self.wf = MoldenWavefunction(data)
-            self.get_orbital_cube(self.wf.homo)
+            self.get_orbital_cube(0)
         else:
             raise ValueError("No corrected data loaded. Expect cube file or molden file.")
 
@@ -230,7 +247,7 @@ class DensityViewer():
         self.clipcolorbar.clim = (-var, var)
         self.figure.update()
 
-    # the following functions are interactive functions
+    # Interactive functions
     def modify_clipplane(self, ax=0, ay=0, az=0, dx=0, dy=0, dz=0):
         cp = self.clipplane
         cp[-1,-1] = np.array(rot(*self.clipplane[-1,-1], ax, ay, az), dtype = np.float32)
@@ -305,6 +322,9 @@ class DensityViewer():
 
     def on_key_press(self, event):
         s = event._key._names[0]
+        if s == "L":
+            oid = self.current_orbital_idx
+            self.substract(oid, GaussianCube(f"cubefiles\\orb0000{str(oid+1).zfill(2)}.cub"))
         if s not in self.keyops:
             return 
         self.keyops[s]()
@@ -316,12 +336,34 @@ class DensityViewer():
     def run(self):
         self.figure.show(visible=True, run = True)
 
+    def substract(self, orbidx, c2:GaussianCube):
+        
+        self.get_orbital_cube(orbidx)
+        a = self.cube.dx * self.cube.dy * self.cube.dz
+        b = c2.dx * c2.dy * c2.dz
+
+        A = self.cube.data
+        B = c2.data
+        print(np.sum(A)*a, np.sum(B)*b)
+
+
+        dV = A - B
+        var = self.volume.clim[1]
+        self.volume.set_data(dV.transpose(2,1,0).copy(), clim = (-var, var))
+        self.figure.update()
+
 
 if __name__ == "__main__":
-    filename1 = 'moldenfiles/1-benzene.molden'
-    # filename1 = 'cubefiles/7-coronene-hh-tddft.cisdp01.cube'
+
+    filename1 = 'terachem/7-coronene-es.molden'
+    filename1 = 'shit.molden'
     viewer = DensityViewer()
+    # viewer.read("cubefiles\\orb000001.cub")
+    # viewer.initialize_scene()
+    # viewer.run()
+    # exit()
     viewer.read(filename1)
 
     viewer.initialize_scene()
+    viewer.get_electron_density()
     viewer.run()

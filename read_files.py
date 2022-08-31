@@ -35,7 +35,9 @@ class MoldenWavefunction:
         self.molecule = None
         self.gtoshells = []
         self.gtos = []
+        self.n_gtf = 0
         self.C = []
+        self.C_raveled = self.C
         self.energys = []
         self.occupys = []
         self.spins = []
@@ -49,6 +51,8 @@ class MoldenWavefunction:
         self.convert_to_cartesian()
         self.find_frontier()
         self.ravel_gtoshells()
+        self.get_raveled_gtf()
+        self.get_raveled_C()
 
     def find_frontier(self):
         homo, lumo = -1, -1
@@ -65,53 +69,52 @@ class MoldenWavefunction:
         for gtoshell in self.gtoshells:
             self.gtos.extend(gtoshell.gtos)
 
-    def get_raveled_atomidx(self):
-        if not self.temp:
-            self.get_raveled_gtf()
-        if "atomidx" in self.temp:
-            return self.temp["atomidx"]
-        self.temp["atomidx"] = []
-        for i, gto in enumerate(self.gtos):
-            gto:GTO
-            self.temp["atomidx"].extend([gto.atomidx for gtf in gto.funcs])
-        self.temp["atomidx"] = np.array(self.temp["atomidx"], dtype = np.int32)
-        return self.temp["atomidx"]
-
-    def get_raveled_gtf(self, coeffs = []):
+    def get_raveled_gtf(self):
+        """ravel the coefficients into the gaussian function sequence. basis functions containing multiple gaussian functions are raveled into multiple coeffients"""
         if self.temp:
-            coeffs = np.ones_like(self.temp["c0"]) if len(coeffs) == 0 else coeffs
-            cus = np.empty_like(self.temp["c0"])
-            cn = 0
-            for i, gto in enumerate(self.gtos):
-                for gtf in gto.funcs:
-                    cus[cn] = coeffs[i]
-                    cn += 1
-            return self.temp["c0"] * cus, self.temp["a"], self.temp["p"], self.temp["pow"]
+            return self.temp["c0"], self.temp["a"], self.temp["p"], self.temp["pow"], self.temp["atomidx"]
 
         n_gtf = sum([len(gto.funcs) for gto in self.gtos])
+        self.n_gtf = n_gtf
         coeffs0 = np.empty(n_gtf, dtype = np.float32)
-        cus = np.empty(n_gtf, dtype = np.float32)
-        coeffs = np.ones_like(coeffs0) if len(coeffs) == 0 else coeffs
         
         contracts = np.empty(n_gtf, dtype = np.float32)
         positions = np.empty((n_gtf, 3), dtype = np.float32)
         powers = np.empty((n_gtf, 3), dtype = np.int32)
+        atomidxs = []
         cn = 0
-        
         for i, gto in enumerate(self.gtos):
+            atomidxs.extend([gto.atomidx for gtf in gto.funcs])
             for gtf in gto.funcs:
-                coeffs0[cn] = gtf.A * gtf.c
+                coeffs0[cn] = gtf.c
                 contracts[cn] = gtf.a
                 positions[cn] = gto.p
                 powers[cn,0], powers[cn,1], powers[cn,2] = gtf.i, gtf.j, gtf.k
-                cus[cn] = coeffs[i]
                 cn += 1
-        self.temp = {"c0":coeffs0, "a":contracts, "p":positions, "pow":powers}
+        atomidxs = np.ascontiguousarray(atomidxs, dtype = np.int32)
+        self.temp = {"c0":coeffs0, "a":contracts, "p":positions, "pow":powers, "atomidx":atomidxs}
         self.logger.log(f"Raveled the basis set into {cn} gaussian functions.")
-        return coeffs0 * cus, contracts, positions, powers
+        return coeffs0, contracts, positions, powers, atomidxs
+
+    def get_raveled_C(self):
+        """ravel the coefficients into the gaussian function sequence. basis functions containing multiple gaussian functions are raveled into multiple coeffients"""
+        if type(self.C) == type(self.C_raveled) == np.ndarray and self.C.shape == self.C_raveled.shape:
+            return self.C
+        if isinstance(self.C_raveled, np.ndarray) and self.C_raveled.shape[0] == self.n_gtf:
+            return self.C_raveled
+        n_gtf = sum([len(gto.funcs) for gto in self.gtos])
+        self.n_gtf = n_gtf
+        self.C_raveled = np.empty((n_gtf, self.C.shape[0]))
+        cn = 0
+        for i, gto in enumerate(self.gtos):
+            for gtf in gto.funcs:
+                self.C_raveled[cn] = self.C[i]
+                cn += 1
+        return self.C_raveled
 
     def convert_to_cartesian(self):
         """it is more convenient to calculate cartesian basis set"""
+        self.C = self.C.T   # 因为一个错误导致这个函数是按照C是行向量来写的。先把列向量的C转成行向量，然后再转回去
         cat_len = {"s":1, "p":3, "d":6, "f":10, "g":15, "h":21}
         sph_len = {"s":1, "p":3, "d":5, "f": 7, "g": 9, "h":11}
         n_cat, n_sph = 0, 0
@@ -120,6 +123,7 @@ class MoldenWavefunction:
             n_sph += sph_len[shell.s]
         if n_cat == self.C.shape[1]:
             self.logger.log(f"Cartesian basis set detected. Total {n_cat} gtos with {len(self.gtoshells)} shells.")
+            self.C = self.C.T
             return
         elif n_sph != self.C.shape[1]:
             raise ValueError(f"The number of MO coefficnents are supposed to be {n_cat} for cartesian basis or {n_sph} for spherical basis, not {self.C.shape[1]}")
@@ -128,12 +132,12 @@ class MoldenWavefunction:
         newC = np.zeros((self.C.shape[0], n_cat), dtype = np.float32)
         for i, shell in enumerate(self.gtoshells):
             icat, isph = cat_len[shell.s], sph_len[shell.s]
-            C_sph = np.concatenate((self.C[:,sphb:sphb+isph], np.zeros((self.C.shape[0], icat-isph), dtype = np.float32)), axis = 1)
-            C_cat = C_sph @ self.convert_mats[shell.s]
+            C_sph = self.C[:,sphb:sphb+isph]
+            C_cat = C_sph @ self.convert_mats[shell.s].T
             newC[:,catb:catb+icat] = C_cat
             sphb += isph
             catb += icat
-        self.C = np.concatenate((newC, np.zeros((n_cat-n_sph, n_cat), dtype = np.float32)), axis = 0)
+        self.C = np.concatenate((newC, np.zeros((n_cat-n_sph, n_cat), dtype = np.float32)), axis = 0).T
         self.energys = np.concatenate((self.energys, np.zeros(n_cat-n_sph, dtype=np.float32)))
         self.occupys = np.concatenate((self.occupys, np.zeros(n_cat-n_sph, dtype=np.float32)))
         self.spins = np.concatenate((self.spins, np.zeros(n_cat-n_sph, dtype=np.float32)))
@@ -144,7 +148,7 @@ class MoldenWavefunction:
         elems, coords = [], []
         with open(fp, "r", errors="ignore") as f:
             n_orb, n_coeff, N_coeff = 0, 0, 0
-            section, i = "", 0
+            section, i, crdunit = "", 0, "AU"
             sections = set(["[Title]", "[Atoms]", "[GTO]", "[MO]"])
             while True:
                 line = f.readline()
@@ -155,11 +159,13 @@ class MoldenWavefunction:
                     continue
                 if data[0] in sections:
                     section = data[0]
-                    continue
-
+                    if data[0] == "[Atoms]" and len(data) >= 2:
+                        crdunit = data[1]
                 elif section == "[Atoms]":
                     elem, atmid, atmwt = data[0], int(data[1]), int(data[2])
                     x, y, z = float(data[3]), float(data[4]), float(data[5])
+                    if crdunit == "Angs":
+                        x, y, z = x/0.529177249, y/0.529177249, z/0.529177249
                     coords.append([x, y, z])
                     elems.append(elem)
 
@@ -202,7 +208,7 @@ class MoldenWavefunction:
                             if len(data) != 2 or data[0].find("=") != -1:
                                 break
                             iii, ccc = data[0], data[1]
-                            spltidx = line.find(ccc)-1
+                            spltidx = line.find(ccc)-3
                             self.C[-1].append(float(line[spltidx:]))
 
                 if section == "[MO]" and len(self.C) > 0:
@@ -237,6 +243,7 @@ class MoldenWavefunction:
         elif n_energy < n_coeffs:
             self.C = np.concatenate((self.C, np.zeros((n_coeffs - n_energy, n_coeffs))), axis = 0)
         n, n = self.C.shape
+        self.C = self.C.T
         self.molecule = Molecule(elems, coords)
         self.energys = np.array(self.energys[:n])
         self.occupys = np.array(self.occupys[:n])
@@ -279,6 +286,9 @@ class GaussianCube:
         self.maxpos = (self.xmax, self.ymax, self.zmax)
         self.grid_size = (self.dx, self.dy, self.dz)
         self.shape = self.data.shape
+
+    def __getitem__(self, _i):
+        return self.data[_i]
 
     def read_block(self, f, bsize:int):
         while True:
@@ -438,6 +448,6 @@ def read_cis_output(fp:str):
         excitations.append(e)
     return excitations
 
-
-result = read_cis_output("terachem\\7-coronene-es.out")
-print(result)
+if __name__ == "__main__":
+    result = read_cis_output("terachem\\7-coronene-es.out")
+    print(result)

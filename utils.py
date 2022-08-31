@@ -16,58 +16,6 @@ elemlabel = {1: 'H', 30: 'Zn', 63: 'Eu', 2: 'He', 31: 'Ga', 64: 'Gd', 3: 'Li', 3
 elemradius = {1: 0.50, 30: 1.22, 63: 1.98, 2: 0.28, 31: 1.22, 64: 1.96, 3: 1.28, 32: 1.2, 65: 1.94, 4: 0.96, 33: 1.19, 66: 1.92, 5: 0.84, 34: 1.2, 67: 1.92, 6: 0.76, 35: 1.2, 68: 1.89, 36: 1.16, 69: 1.9, 37: 2.2, 70: 1.87, 7: 0.71, 38: 1.95, 71: 1.87, 8: 0.66, 39: 1.9, 72: 1.75, 9: 0.57, 40: 1.75, 73: 1.7, 10: 0.58, 41: 1.64, 74: 1.62, 11: 1.66, 42: 1.54, 75: 1.51, 12: 1.41, 43: 1.47, 76: 1.44, 13: 1.21, 44: 1.46, 77: 1.41, 14: 1.11, 45: 1.42, 78: 1.36, 15: 1.07, 46: 1.39, 79: 1.36, 16: 1.05, 47: 1.45, 80: 1.32, 17: 1.02, 48: 1.44, 81: 1.45, 18: 1.06, 49: 1.42, 82: 1.46, 19: 2.03, 50: 1.39, 83: 1.48, 20: 1.76, 51: 1.39, 84: 1.4, 21: 1.7, 52: 1.38, 85: 1.5, 22: 1.6, 53: 1.39, 86: 1.5, 23: 1.53, 54: 1.4, 87: 2.6, 24: 1.39, 55: 2.44, 88: 2.21, 25: 1.39, 56: 2.15, 89: 2.15, 57: 2.07, 90: 2.06, 26: 1.32, 58: 2.04, 91: 2.0, 59: 2.03, 92: 1.96, 27: 1.26, 60: 2.01, 93: 1.9, 61: 1.99, 94: 1.87, 28: 1.24, 62: 1.98, 95: 1.8, 29: 1.32, 96: 1.69}
 elemradius = {elemlabel[i]: elemradius[i] for i in elemlabel}
 
-S_convert = np.matrix([
-    [1.00000000,],
-], dtype = np.float32).I
-
-P_convert = np.matrix([
-    [1.00000000, 0.00000000, 0.00000000],
-    [0.00000000, 1.00000000, 0.00000000],
-    [0.00000000, 0.00000000, 1.00000000],
-], dtype = np.float32).I
-
-D_convert = np.matrix([
-    # D 0, D+1, D-1, D+2, D-2, S
-    [-0.50000000, 0.00000000, 0.00000000, 0.86602540, 0.00000000, 1.00000000], #xx
-    [-0.50000000, 0.00000000, 0.00000000,-0.86602540, 0.00000000, 1.00000000], #yy
-    [ 1.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 1.00000000], #zz
-    [ 0.00000000, 0.00000000, 0.00000000, 0.00000000, 1.00000000, 0.00000000], #xy
-    [ 0.00000000, 1.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000], #xz
-    [ 0.00000000, 0.00000000, 1.00000000, 0.00000000, 0.00000000, 0.00000000], #yz
-], dtype = np.float32).I
-F_convert = np.matrix([
-    # F+0, F+1, F-1, F+2, F-2, F+3, F-3, px, py, pz
-    [ 0.00000000,-0.61237244, 0.00000000, 0.00000000, 0.00000000, 0.79056942, 0.00000000, 1.00000000, 0.00000000, 0.00000000], #xxx
-    [ 0.00000000, 0.00000000,-0.61237244, 0.00000000, 0.00000000, 0.00000000,-0.79056942, 0.00000000, 1.00000000, 0.00000000], #yyy
-    [ 1.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 1.00000000], #zzz
-    [ 0.00000000,-0.27386127, 0.00000000, 0.00000000, 0.00000000,-1.06066017, 0.00000000, 1.00000000, 0.00000000, 0.00000000], #xyy
-    [ 0.00000000, 0.00000000,-0.27386127, 0.00000000, 0.00000000, 0.00000000, 1.06066017, 0.00000000, 1.00000000, 0.00000000], #xxy
-    [-0.67082039, 0.00000000, 0.00000000, 0.86602540, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 1.00000000], #xxz
-    [ 0.00000000, 1.09544511, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 1.00000000, 0.00000000, 0.00000000], #xzz
-    [ 0.00000000, 0.00000000, 1.09544511, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 1.00000000, 0.00000000], #yzz
-    [-0.67082039, 0.00000000, 0.00000000,-0.86602540, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 1.00000000], #yyz
-    [ 0.00000000, 0.00000000, 0.00000000, 0.00000000, 1.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000], #xyz
-], dtype = np.float32).I
-G_convert = np.matrix([
-    # G+0,G+1,G-1G+2,G-2,G+3,G-3,G+4,G-4, D+0, D+1, D-1, D+2, D-2, S
-    [ 1.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 1.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 1.00000000], #zzzz
-    [ 0.00000000, 0.00000000, 1.19522860, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 1.00000000, 0.00000000, 0.00000000, 0.00000000], #yzzz
-    [-0.87831006, 0.00000000, 0.00000000,-0.98198050, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.50000000, 0.00000000, 1.00000000,-0.86602540, 0.00000000, 2.00000000], #yyzz
-    [ 0.00000000, 0.00000000,-0.89642145, 0.00000000, 0.00000000, 0.00000000,-0.79056941, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000], #yyyz
-    [ 0.37500000, 0.00000000, 0.00000000, 0.55901699, 0.00000000, 0.00000000, 0.00000000, 0.73950997, 0.00000000,-0.50000000, 0.00000000, 0.00000000,-0.86602540, 0.00000000, 1.00000000], #yyyy
-    [ 0.00000000, 1.19522860, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 1.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000], #xzzz
-    [ 0.00000000, 0.00000000, 0.00000000, 0.00000000, 1.13389341, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 1.00000000, 0.00000000], #xyzz
-    [ 0.00000000,-0.40089186, 0.00000000, 0.00000000, 0.00000000,-1.06066017, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 1.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000], #xyyz
-    [ 0.00000000, 0.00000000, 0.00000000, 0.00000000,-0.42257712, 0.00000000, 0.00000000, 0.00000000,-1.11803398, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 1.00000000, 0.00000000], #xyyy
-    [-0.87831006, 0.00000000, 0.00000000, 0.98198050, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.50000000, 0.00000000, 0.00000000, 0.86602540, 0.00000000, 2.00000000], #xxzz
-    [ 0.00000000, 0.00000000,-0.40089186, 0.00000000, 0.00000000, 0.00000000, 1.06066017, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 1.00000000, 0.00000000, 0.00000000, 0.00000000], #xxyz
-    [ 0.21957751, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000,-1.29903810, 0.00000000,-1.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 2.00000000], #xxyy
-    [ 0.00000000,-0.89642145, 0.00000000, 0.00000000, 0.00000000, 0.79056941, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 1.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000], #xxxz
-    [ 0.00000000, 0.00000000, 0.00000000, 0.00000000,-0.42257712, 0.00000000, 0.00000000, 0.00000000, 1.11803398, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 1.00000000, 0.00000000], #xxxy
-    [ 0.37500000, 0.00000000, 0.00000000,-0.55901699, 0.00000000, 0.00000000, 0.00000000, 0.73950997, 0.00000000,-0.50000000, 0.00000000, 0.00000000, 0.86602540, 0.00000000, 1.00000000], #xxxx        
-], dtype = np.float32).I
-
-
 @njit
 def rot(x, y, z, ax, ay, az):
     x = np.cos(az)*x - np.sin(az)*y
@@ -81,38 +29,76 @@ def rot(x, y, z, ax, ay, az):
     return x, y, z
 
 @cuda.jit
-def cube_kernel_v1(V:np.ndarray, xmin, ymin, zmin, dx, dy, dz, coeffs, contracts, positions, powers):
+def orbital_value_kernel_v1(V:np.ndarray, xmin, ymin, zmin, dx, dy, dz, normcoeffs, contracts, positions, powers, atomidxs, coeffs):
     # the most traditional way to calculate cube files.
     i, j, k = cuda.grid(3)
     if i < V.shape[0] and j < V.shape[1] and k < V.shape[2]:
         V[i,j,k] = 0
-        for n in range(len(coeffs)):
+        for n in range(len(normcoeffs)):
             x = xmin + dx * i - positions[n,0]
             y = ymin + dy * j - positions[n,1]
             z = zmin + dz * k - positions[n,2]
-            V[i,j,k] += coeffs[n] * x**powers[n,0] * y**powers[n,1] * z**powers[n,2] * exp(-contracts[n] * (x*x+y*y+z*z))
+            V[i,j,k] += coeffs[n] * normcoeffs[n] * x**powers[n,0] * y**powers[n,1] * z**powers[n,2] * exp(-contracts[n] * (x*x+y*y+z*z))
 
 @cuda.jit
-def cube_kernel_v2(V:np.ndarray, xmin, ymin, zmin, dx, dy, dz, coeffs, contracts, positions, powers, atomidxs):
+def orbital_value_kernel_v2(V:np.ndarray, xmin, ymin, zmin, dx, dy, dz, normcoeffs, contracts, positions, powers, atomidxs, coeffs):
     # A faster version of calculating cube files by reducing the call of exp(). Has 1/3 time cost of version 1
     # basis contribution smaller than 1.0e-9 are neglected because of the accuracy of float32
     i, j, k = cuda.grid(3)
     if i < V.shape[0] and j < V.shape[1] and k < V.shape[2]:
         V[i,j,k] = 0
         aid, contract = -1, 0.0
-        for n in range(len(coeffs)):
-            if aid != atomidxs[n]:
+        for n in range(len(normcoeffs)):    
+            if aid != atomidxs[n]:      # This if never generate branches because the atomidx for every threads is the same!
                 aid = atomidxs[n]
                 x = xmin + dx * i - positions[n,0]
                 y = ymin + dy * j - positions[n,1]
                 z = zmin + dz * k - positions[n,2]
                 r2 = x*x+y*y+z*z
-            if contract != contracts[n]:
+            if contract != contracts[n]:    # So do this if
                 ar2 = contracts[n] * r2
-                if ar2 >= 25.0:
+                if ar2 >= 25.0:         # This may branch. But it depends on the spacial position of the grid point of this thread so mostly it will not branch
                     continue
                 exponent = exp(-ar2)
-            V[i,j,k] += coeffs[n] * x**powers[n,0] * y**powers[n,1] * z**powers[n,2] * exponent
+            V[i,j,k] += coeffs[n] * normcoeffs[n] * x**powers[n,0] * y**powers[n,1] * z**powers[n,2] * exponent
+
+@njit
+def orbital_value_kernel_cpu(V:np.ndarray, xmin, ymin, zmin, dx, dy, dz, normcoeffs, contracts, positions, powers, atomidxs, coeffs):
+    # A faster version of calculating cube files by reducing the call of exp(). Has 1/3 time cost of version 1
+    # basis contribution smaller than 1.0e-9 are neglected because of the accuracy of float32
+    for i in range(V.shape[0]):
+        for j in range(V.shape[1]):
+            for k in range(V.shape[2]):
+                V[i,j,k] = 0
+                for n in range(len(normcoeffs)):
+                    x = xmin + dx * i - positions[n,0]
+                    y = ymin + dy * j - positions[n,1]
+                    z = zmin + dz * k - positions[n,2]
+                    V[i,j,k] += coeffs[n] * normcoeffs[n] * x**powers[n,0] * y**powers[n,1] * z**powers[n,2] * exp(-contracts[n] * (x*x+y*y+z*z))
+
+@cuda.jit
+def density_kernel(V:np.ndarray, xmin, ymin, zmin, dx, dy, dz, normcoeffs, contracts, positions, powers, atomidxs, C_raveled, occupys):
+    i, j, k = cuda.grid(3)
+    if i < V.shape[0] and j < V.shape[1] and k < V.shape[2]:
+        for m in range(len(occupys)):
+            if occupys[m] == 0.0:
+                continue
+            Vijk = 0
+            aid, contract = -1, 0.0
+            for n in range(len(normcoeffs)):
+                if aid != atomidxs[n]:
+                    aid = atomidxs[n]
+                    x = xmin + dx * i - positions[n,0]
+                    y = ymin + dy * j - positions[n,1]
+                    z = zmin + dz * k - positions[n,2]
+                    r2 = x*x+y*y+z*z
+                if contract != contracts[n]:
+                    ar2 = contracts[n] * r2
+                    if ar2 >= 25.0:
+                        continue
+                    exponent = exp(-ar2)
+                Vijk += C_raveled[n,m] * normcoeffs[n] * x**powers[n,0] * y**powers[n,1] * z**powers[n,2] * exponent
+            V[i,j,k] += Vijk*Vijk*occupys[m]
 
 def get_plane_values(p0, pv, plen, ngrid, V:np.ndarray, xmin, ymin, zmin, dx, dy, dz):
     xmax, ymax, zmax = xmin+dx*V.shape[0], ymin+dy*V.shape[1], zmin+dz*V.shape[2]
