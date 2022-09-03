@@ -48,7 +48,7 @@ class DensityViewer():
         self.current_orbital_idx = -1
         self.current_delta_var = -1
         self.current_isosurface = -1
-        self.grid_dims = (100,100,100)
+        self.grid_dims = (128, 128, 128)
         self.grid_padding = 6.0
         self.volume = None
         self.isosurface_1 = None
@@ -127,7 +127,7 @@ class DensityViewer():
         t = time.time()
         self.cube.data = self.dm.get_orbital_value(orbidx)
         self.logger.log(f"Time for cube file generation: {time.time()-t:.3f} second.")
-        print("Sum up all values: " + str(np.sum(self.cube.data*self.cube.data) * (self.cube.dx*self.cube.dy*self.cube.dz)))
+        return self.cube.data
 
     def get_electron_density(self):
         if not self.dm:
@@ -136,6 +136,40 @@ class DensityViewer():
         t = time.time()
         self.logger.log("Calculating electron density")
         V = self.dm.get_electron_density()
+        a = np.sum(V)
+        a *= self.cube.dx*self.cube.dy*self.cube.dz
+        self.logger.log(f"Summing up all value and multiply differential element: {a}")
+        self.logger.log(f"Time cost: {time.time()-t}")
+        return V
+
+    def get_transition_density(self, ext:Excitation = None):
+        """Calculate the transition density"""
+        if not self.dm:
+            self.logger.log("No wavefunction loaded. Cannot calculate transition density.")
+            return 
+        if not ext:
+            self.logger.log("No excitation loaded. Cannot calculate transition density.")
+            return 
+        t = time.time()
+        self.logger.log("Calculating transition density")
+        V = self.dm.get_transition_density(ext=ext)
+        a = np.sum(V)
+        a *= self.cube.dx*self.cube.dy*self.cube.dz
+        self.logger.log(f"Summing up all value and multiply differential element: {a}")
+        self.logger.log(f"Time cost: {time.time()-t}")
+        return V
+
+    def get_transition_diff_density(self, ext:Excitation = None):
+        """Calculate the density difference between ground state and excited state, also known as particle-hole density"""
+        if not self.dm:
+            self.logger.log("No wavefunction loaded. Cannot calculate transition difference density.")
+            return 
+        if not ext:
+            self.logger.log("No excitation loaded. Cannot calculate transition difference density.")
+            return 
+        t = time.time()
+        self.logger.log("Calculating transition density")
+        V = self.dm.get_transition_diff_density(ext=ext)
         a = np.sum(V)
         a *= self.cube.dx*self.cube.dy*self.cube.dz
         self.logger.log(f"Summing up all value and multiply differential element: {a}")
@@ -355,15 +389,23 @@ class DensityViewer():
 
 if __name__ == "__main__":
 
-    filename1 = 'terachem/7-coronene-es.molden'
-    filename1 = 'shit.molden'
+    # filename1 = 'cubefiles\\benzene.cistp03.cube'
+    filename1 = 'moldenfiles\\7far-h.molden'
     viewer = DensityViewer()
-    # viewer.read("cubefiles\\orb000001.cub")
-    # viewer.initialize_scene()
-    # viewer.run()
-    # exit()
     viewer.read(filename1)
-
+    exts = read_cis_output("moldenfiles\\7far-h.out")
+    ext = exts[0]
     viewer.initialize_scene()
-    viewer.get_electron_density()
+
+    # V1 = viewer.get_orbital_cube(19).copy()
+    # V2 = viewer.get_orbital_cube(21).copy()
+    # V3 = V1 * V2
+    # V1 = viewer.get_orbital_cube(20).copy()
+    # V2 = viewer.get_orbital_cube(22).copy()
+    # V3+= V1 * V2 * -1
+    # viewer.volume.set_data(V3.transpose(2,1,0), clim = (V3.min(), V3.max()))
+    V3 = viewer.get_transition_diff_density(ext)
+    var = max(abs(V3.min()), V3.max())
+    viewer.volume.set_data(V3.transpose(2,1,0), clim = (-var, var))
+
     viewer.run()

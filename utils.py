@@ -28,40 +28,6 @@ def rot(x, y, z, ax, ay, az):
     z = np.sin(ax)*y + np.cos(ax)*z
     return x, y, z
 
-@cuda.jit
-def orbital_value_kernel_v1(V:np.ndarray, xmin, ymin, zmin, dx, dy, dz, normcoeffs, contracts, positions, powers, atomidxs, coeffs):
-    # the most traditional way to calculate cube files.
-    i, j, k = cuda.grid(3)
-    if i < V.shape[0] and j < V.shape[1] and k < V.shape[2]:
-        V[i,j,k] = 0
-        for n in range(len(normcoeffs)):
-            x = xmin + dx * i - positions[n,0]
-            y = ymin + dy * j - positions[n,1]
-            z = zmin + dz * k - positions[n,2]
-            V[i,j,k] += coeffs[n] * normcoeffs[n] * x**powers[n,0] * y**powers[n,1] * z**powers[n,2] * exp(-contracts[n] * (x*x+y*y+z*z))
-
-@cuda.jit
-def orbital_value_kernel_v2(V:np.ndarray, xmin, ymin, zmin, dx, dy, dz, normcoeffs, contracts, positions, powers, atomidxs, coeffs):
-    # A faster version of calculating cube files by reducing the call of exp(). Has 1/3 time cost of version 1
-    # basis contribution smaller than 1.0e-9 are neglected because of the accuracy of float32
-    i, j, k = cuda.grid(3)
-    if i < V.shape[0] and j < V.shape[1] and k < V.shape[2]:
-        V[i,j,k] = 0
-        aid, contract = -1, 0.0
-        for n in range(len(normcoeffs)):    
-            if aid != atomidxs[n]:      # This if never generate branches because the atomidx for every threads is the same!
-                aid = atomidxs[n]
-                x = xmin + dx * i - positions[n,0]
-                y = ymin + dy * j - positions[n,1]
-                z = zmin + dz * k - positions[n,2]
-                r2 = x*x+y*y+z*z
-            if contract != contracts[n]:    # So do this if
-                ar2 = contracts[n] * r2
-                if ar2 >= 25.0:         # This may branch. But it depends on the spacial position of the grid point of this thread so mostly it will not branch
-                    continue
-                exponent = exp(-ar2)
-            V[i,j,k] += coeffs[n] * normcoeffs[n] * x**powers[n,0] * y**powers[n,1] * z**powers[n,2] * exponent
-
 @njit
 def orbital_value_kernel_cpu(V:np.ndarray, xmin, ymin, zmin, dx, dy, dz, normcoeffs, contracts, positions, powers, atomidxs, coeffs):
     # A faster version of calculating cube files by reducing the call of exp(). Has 1/3 time cost of version 1
@@ -77,28 +43,76 @@ def orbital_value_kernel_cpu(V:np.ndarray, xmin, ymin, zmin, dx, dy, dz, normcoe
                     V[i,j,k] += coeffs[n] * normcoeffs[n] * x**powers[n,0] * y**powers[n,1] * z**powers[n,2] * exp(-contracts[n] * (x*x+y*y+z*z))
 
 @cuda.jit
-def density_kernel(V:np.ndarray, xmin, ymin, zmin, dx, dy, dz, normcoeffs, contracts, positions, powers, atomidxs, C_raveled, occupys):
+def orbital_value_kernel_v1(V:np.ndarray, xmin, ymin, zmin, dx, dy, dz, normcoeffs, contracts, positions, powers, atomidxs, coeffs):
+    # the most traditional way to calculate cube files.
     i, j, k = cuda.grid(3)
     if i < V.shape[0] and j < V.shape[1] and k < V.shape[2]:
-        for m in range(len(occupys)):
-            if occupys[m] == 0.0:
+        V[i,j,k] = 0
+        for n in range(len(normcoeffs)):
+            x = xmin + dx * i - positions[n,0]
+            y = ymin + dy * j - positions[n,1]
+            z = zmin + dz * k - positions[n,2]
+            V[i,j,k] += coeffs[n] * normcoeffs[n] * x**powers[n,0] * y**powers[n,1] * z**powers[n,2] * exp(-contracts[n] * (x*x+y*y+z*z))
+
+
+@cuda.jit
+def orbital_value_kernel(
+    V:cuda.cudadrv.devicearray.DeviceNDArray,               # The volume should be filled
+    xmin, ymin, zmin, dx, dy, dz,                           # The parameters of cube
+    normcoeffs, contracts, positions, powers, atomidxs,     # The parameters of every GTFs. it is an readonly device array
+    coeffs                                                  # coefficient of GTFs of the current orbital
+    ):
+    # A faster version of calculating cube files by reducing the call of exp(). Has 1/3 time cost of version 1
+    # basis contribution smaller than 1.0e-9 are neglected because of the accuracy of float32
+    i, j, k = cuda.grid(3)
+    x0, y0, z0 = xmin + dx * i, ymin + dy * j, zmin + dz * k
+    if i < V.shape[0] and j < V.shape[1] and k < V.shape[2]:
+        V[i,j,k] = 0
+        aid = -1
+        for n in range(len(normcoeffs)):    
+            if aid != atomidxs[n]:      # This if never generate branches because the atomidx for every threads is the same!
+                aid = atomidxs[n]
+                x = x0 - positions[n,0]
+                y = y0 - positions[n,1]
+                z = z0 - positions[n,2]
+                r2 = x*x+y*y+z*z
+            ar2 = contracts[n] * r2
+            if ar2 >= 25.0:         # This may branch. But it depends on the spacial position of the grid point of this thread so mostly it will not branch
                 continue
-            Vijk = 0
-            aid, contract = -1, 0.0
+            V[i,j,k] += coeffs[n] * normcoeffs[n] * x**powers[n,0] * y**powers[n,1] * z**powers[n,2] * exp(-ar2)    # The most time comsuming part
+
+
+@cuda.jit
+def density_kernel(
+    V:cuda.cudadrv.devicearray.DeviceNDArray,               # The volume should be filled
+    xmin, ymin, zmin, dx, dy, dz,                           # The parameters of cube
+    normcoeffs, contracts, positions, powers, atomidxs,     # The parameters of every GTFs. it is an readonly device array
+    C_raveled,                                              # coefficient matrix of each GTF. also readonly device array
+    iket, ibra, coeff                                       # sparse matrix representation of the density matrix. the row, col index and the corresponding non-zero value
+    ):
+    # the parameter was set in this form because every density, like transition density, pure density, electrom-hole map, their matrix on the MO basis are very sparse. 
+    # the density at point r always has the form p(r) = sum_uv(fu(r) * D_ao[u,v] * fv(r)) = sum_ij(phi_i(r) * D_mo[i,j] * phi_j(r))
+    i, j, k = cuda.grid(3)
+    x0, y0, z0 = xmin + dx * i, ymin + dy * j, zmin + dz * k
+    if i < V.shape[0] and j < V.shape[1] and k < V.shape[2]:
+        for m in range(len(coeff)):
+            vket, vbra = 0.0, 0.0
+            aid = -1
             for n in range(len(normcoeffs)):
                 if aid != atomidxs[n]:
                     aid = atomidxs[n]
-                    x = xmin + dx * i - positions[n,0]
-                    y = ymin + dy * j - positions[n,1]
-                    z = zmin + dz * k - positions[n,2]
+                    x = x0 - positions[n,0]
+                    y = y0 - positions[n,1]
+                    z = z0 - positions[n,2]
                     r2 = x*x+y*y+z*z
-                if contract != contracts[n]:
-                    ar2 = contracts[n] * r2
-                    if ar2 >= 25.0:
-                        continue
-                    exponent = exp(-ar2)
-                Vijk += C_raveled[n,m] * normcoeffs[n] * x**powers[n,0] * y**powers[n,1] * z**powers[n,2] * exponent
-            V[i,j,k] += Vijk*Vijk*occupys[m]
+                ar2 = contracts[n] * r2
+                if ar2 >= 25.0:
+                    continue
+                v0 = normcoeffs[n] * x**powers[n,0] * y**powers[n,1] * z**powers[n,2] * exp(-ar2)
+                vket += C_raveled[n,iket[m]] * v0
+                vbra += C_raveled[n,ibra[m]] * v0
+            V[i,j,k] += vbra * vket * coeff[m]
+
 
 def get_plane_values(p0, pv, plen, ngrid, V:np.ndarray, xmin, ymin, zmin, dx, dy, dz):
     xmax, ymax, zmax = xmin+dx*V.shape[0], ymin+dy*V.shape[1], zmin+dz*V.shape[2]

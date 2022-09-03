@@ -325,7 +325,7 @@ class GaussianCube:
                     pass
                 elif iline == 3:
                     n_atom, xmin, ymin, zmin = line.split()
-                    n_atom = int(n_atom)
+                    n_atom = abs(int(n_atom))
                     self.xmin = float(xmin)
                     self.ymin = float(ymin)
                     self.zmin = float(zmin)
@@ -414,8 +414,8 @@ def read_cis_output(fp:str):
             if not result:
                 continue
             result = result.groupdict()
-            occus[-1].append(int(result["occu"]))
-            virts[-1].append(int(result["virt"]))
+            occus[-1].append(int(result["occu"])-1)
+            virts[-1].append(int(result["virt"])-1)
             coeffs[-1].append(float(result["coeff"]))
         f.seek(curlinestart)
         eexts, oscis = [], []

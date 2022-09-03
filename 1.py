@@ -16,3 +16,16 @@ for i in range(0, J+1):
         k = J - i - j
         if 0 <= k <= J:
             print(i, j, k, f(i, j, k))
+
+
+from numba import cuda
+import numpy as np
+
+class A:
+    def __init__(self):
+
+        self.a = cuda.to_device(np.zeros((10, 10), dtype = np.float32))
+
+inst = A()
+print(inst.a)
+print(inst.a.copy_to_host())
