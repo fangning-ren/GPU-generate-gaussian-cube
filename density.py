@@ -103,7 +103,7 @@ class DensityManager:
         cuda.synchronize()
         return dV.copy_to_host()
 
-    def get_transition_diff_density_matrix(self, ext:Excitation):
+    def get_difference_density_matrix(self, ext:Excitation):
         """the transition density matrix can still be obtained, but the MO coefficients are no longer the eigenvector of the density matrix."""
         D = np.diag(self.wf.occupys, k = 0)
         tdm = np.copy(D) / 2
@@ -119,7 +119,7 @@ class DensityManager:
         tdm -= D
         return self.C @ tdm @ self.C.T
 
-    def get_transition_diff_density(self, ext:Excitation):
+    def get_difference_density(self, ext:Excitation):
         sparse_tdm = {}
         for i, a, wia in zip(ext.orb1, ext.orb2, ext.cisc):
             for j, b, wjb in zip(ext.orb1, ext.orb2, ext.cisc):

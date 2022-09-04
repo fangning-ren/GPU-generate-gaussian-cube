@@ -10,6 +10,7 @@ from density import DensityManager
 from utils import *
 from basis import *
 from read_files import *
+from read_excitation import *
 from density import *
 
 class DensityViewer():
@@ -130,6 +131,7 @@ class DensityViewer():
         return self.cube.data
 
     def get_electron_density(self):
+        "Calculate the electron density"
         if not self.dm:
             self.logger.log("No wavefunction loaded. Cannot calculate electron density.")
             return 
@@ -159,8 +161,8 @@ class DensityViewer():
         self.logger.log(f"Time cost: {time.time()-t}")
         return V
 
-    def get_transition_diff_density(self, ext:Excitation = None):
-        """Calculate the density difference between ground state and excited state, also known as particle-hole density"""
+    def get_difference_density(self, ext:Excitation = None):
+        """Calculate the density difference between ground state and excited state, also known as the particle-hole density"""
         if not self.dm:
             self.logger.log("No wavefunction loaded. Cannot calculate transition difference density.")
             return 
@@ -168,8 +170,8 @@ class DensityViewer():
             self.logger.log("No excitation loaded. Cannot calculate transition difference density.")
             return 
         t = time.time()
-        self.logger.log("Calculating transition density")
-        V = self.dm.get_transition_diff_density(ext=ext)
+        self.logger.log("Calculating difference density")
+        V = self.dm.get_difference_density(ext=ext)
         a = np.sum(V)
         a *= self.cube.dx*self.cube.dy*self.cube.dz
         self.logger.log(f"Summing up all value and multiply differential element: {a}")
@@ -404,7 +406,7 @@ if __name__ == "__main__":
     # V2 = viewer.get_orbital_cube(22).copy()
     # V3+= V1 * V2 * -1
     # viewer.volume.set_data(V3.transpose(2,1,0), clim = (V3.min(), V3.max()))
-    V3 = viewer.get_transition_diff_density(ext)
+    V3 = viewer.get_difference_density(ext)
     var = max(abs(V3.min()), V3.max())
     viewer.volume.set_data(V3.transpose(2,1,0), clim = (-var, var))
 

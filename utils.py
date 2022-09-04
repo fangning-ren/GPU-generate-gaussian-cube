@@ -88,7 +88,7 @@ def density_kernel(
     xmin, ymin, zmin, dx, dy, dz,                           # The parameters of cube
     normcoeffs, contracts, positions, powers, atomidxs,     # The parameters of every GTFs. it is an readonly device array
     C_raveled,                                              # coefficient matrix of each GTF. also readonly device array
-    iket, ibra, coeff                                       # sparse matrix representation of the density matrix. the row, col index and the corresponding non-zero value
+    iket, ibra, coeff                                       # sparse matrix representation of the density matrix on the mo representation. the row, col index and the corresponding non-zero value
     ):
     # the parameter was set in this form because every density, like transition density, pure density, electrom-hole map, their matrix on the MO basis are very sparse. 
     # the density at point r always has the form p(r) = sum_uv(fu(r) * D_ao[u,v] * fv(r)) = sum_ij(phi_i(r) * D_mo[i,j] * phi_j(r))
