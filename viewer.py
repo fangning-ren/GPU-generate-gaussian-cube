@@ -1,3 +1,5 @@
+#python
+
 import numpy as np
 import time
 
@@ -5,13 +7,167 @@ import vispy.plot as vplt
 from vispy import scene
 from vispy.visuals.filters import Alpha
 from vispy.color import Colormap
-from density import DensityManager
 
 from utils import *
 from basis import *
 from read_files import *
-from read_excitation import *
+from convert_to_orca import *
 from density import *
+
+
+class EnergyViewer():
+    def __init__(self, fig:vplt.PlotWidget):
+        self.fig = fig
+        self.fig._configure_2d()
+        self.view = self.fig.view
+        self.view:scene.ViewBox
+        self.e = None
+        self.elines = None
+        self.eplot = None
+        self.etext = None
+        
+        self.avg_de = 1.0
+        self.dl = 1.0
+
+        self.highlight_level = scene.visuals.Line(np.array([[0, 0.5],[0, 0]]), color = (1.0, 0.0, 0.0, 0.75), width = 10)
+        self.currentidx = 0
+
+    def plot_energy(self, energys):
+        self.e = np.array(energys)
+        self.e = self.e[self.e != 0.0]
+
+        if self.e.shape[0] >= 20:
+            n = self.e.shape[0]
+            emid = self.e[int(n*0.25):int(n*0.75)]
+            avg_de = (emid.max() - emid.min()) // emid.shape[0]
+        else:
+            avg_de = (self.e.max() - self.e.min()) // self.e.shape[0]
+        degenerate_threshold = 5.0e-4
+        dl = 0.05
+        cur_xleft = 0.0
+
+        xs = [[cur_xleft, cur_xleft+dl],]
+        ys = [[self.e[0], self.e[0]],]
+        connect = [[0, 1],]
+        texts = [f"{self.e[0]:>.3f}",]
+        for i in range(1, self.e.shape[0]):
+            if abs(self.e[i] - self.e[i-1]) <= degenerate_threshold:
+                cur_xleft += dl * 1.5
+            else:
+                cur_xleft = 0
+            xs.append([cur_xleft, cur_xleft + dl])
+            ys.append([self.e[i], self.e[i]])
+            connect.append([i*2, i*2+1])
+            texts.append(f"{self.e[i]:>.3f}")
+
+            
+        xs, ys, connect = np.array(xs), np.array(ys), np.array(connect)
+        self.elines = np.stack((xs, ys), axis = -1)
+        self.eplot = scene.visuals.LinePlot((xs.ravel(), ys.ravel()), color = "blue", symbol = "-", width = 2, connect = connect)
+        self.etext = scene.visuals.Text(texts, color = "blue", pos = [(-dl*0.1, e) for e in self.e], anchor_x = "right", anchor_y = "center")
+
+        self.view.add(self.eplot)
+        self.view.add(self.etext)
+        self.view.add(self.highlight_level)
+        self.view.camera.set_range(x = (-dl*1.5, dl*3.2), y = (-avg_de, avg_de))
+
+        self.avg_de = avg_de
+        self.dl = dl
+
+    def move_to_energy(self, eidx:int):
+        self.highlight_level:scene.visuals.visuals.LineVisual
+        self.highlight_level.set_data(self.elines[eidx])
+        xl = self.elines[eidx][0][0]
+        xr = self.elines[eidx][1][0]
+        ys = self.elines[eidx][0][1]
+        self.view.camera.center = (xl - self.dl*0.5, ys)
+        self.currentidx = eidx
+
+    def recover_everything(self):
+        self.view.add(self.eplot)
+        self.view.add(self.etext)
+        self.view.add(self.highlight_level)
+        self.view.camera.set_range(x = (-self.dl*1.5, self.dl*3.2), y = (-self.avg_de, self.avg_de))
+        self.move_to_energy(self.currentidx)
+
+    def detach_everything(self):
+        self.eplot:scene.visuals.visuals.LinePlotVisual
+        self.eplot.parent = None
+        self.etext.parent = None
+        self.highlight_level.parent = None
+
+class SpectrumViewer():
+    def __init__(self, fig:vplt.PlotWidget):
+        self.fig = fig
+        self.fig._configure_2d()
+        self.view = self.fig.view
+        self.view:scene.ViewBox
+
+        self.uvspec = None
+        self.uvpeak = None
+        self.peaks = None
+        self.highlight_peak = scene.visuals.Line(np.array([[0, 0.5],[0, 0]]), color = (1.0, 0.0, 0.0, 0.75), width = 2.5)
+        self.currentidx = 0
+
+        self.wwlstart = 200
+        self.wwlend = 500
+
+        self.camxrange = (self.wwlend - self.wwlstart) / 10
+        self.camyrange = 10
+
+    def _spectrum(self, es, oscs, sigma, x):
+        y = np.zeros_like(x)
+        for e, osc in zip(es, oscs):
+            y += osc * np.exp(-(x - e)**2 / (sigma**2))
+        return y
+
+    def plot_spectrum(self, exts):
+        xs_wl = np.linspace(self.wwlstart, self.wwlend, 500)
+        xs_ev = 1239.8424121 / xs_wl
+        es_ev = [ext.e*27.2113845 for ext in exts]
+        oscs = [ext.osci for ext in exts]
+        uvspec = self._spectrum(es_ev, oscs, 0.25 / 2.355, xs_ev)
+
+        ptx, pty, connect, i = [], [], [], 0
+        for e, osc in zip(es_ev, oscs):
+            ptx.extend([1239.8424121/e, 1239.8424121/e])
+            pty.extend([0, osc])
+            connect.append((i*2, i*2+1))
+            i += 1
+        connect = np.array(connect)
+
+        ptx, pty = np.array(ptx, dtype = np.float32), np.array(pty, dtype = np.float32)
+        self.uvspec = scene.visuals.LinePlot((xs_wl, uvspec), color = "blue", symbol = "o", width = 2)
+        self.uvpeak = scene.visuals.LinePlot((ptx, pty), color = "blue", width = 5, marker_size = 0, connect = connect)
+        self.peaks = np.stack((ptx[1::2], pty[1::2]), axis = 1)
+
+        self.camxrange = (self.wwlend - self.wwlstart) / 10
+        self.camyrange = max(oscs)
+        self.view.camera.set_range(x = (-self.camxrange, self.camxrange), y = (-self.camyrange, self.camyrange))
+
+        self.view.add(self.uvspec)
+        self.view.add(self.uvpeak)
+        self.view.add(self.highlight_peak)
+
+    def move_to_peak(self, pidx:int):
+        xs = self.peaks[pidx][0]
+        yl = 0
+        yr = self.peaks[pidx][1]
+        self.highlight_peak.set_data(np.array([[xs, yl],[xs, self.peaks[:,1].max()]]))
+        self.view.camera.center = (xs, (yr - yl) / 2)
+        self.currentidx = pidx
+
+    def recover_everything(self):
+        self.view.add(self.uvpeak)
+        self.view.add(self.uvspec)
+        self.view.add(self.highlight_peak)
+        self.view.camera.set_range(x = (-self.camxrange, self.camxrange), y = (-self.camyrange, self.camyrange))
+        self.move_to_peak(self.currentidx)
+
+    def detach_everything(self):
+        self.uvpeak.parent = None
+        self.uvspec.parent = None
+        self.highlight_peak.parent = None
 
 class DensityViewer():
     """This is the frond end"""
@@ -22,11 +178,13 @@ class DensityViewer():
         self.figure = vplt.Fig(bgcolor = "white", size = (1280, 960), show=False)
         self.figmain = self.figure[0:2,0:6]
         self.figclip = self.figure[0:1,6:8]
+        self.figspec = self.figure[1:2,6:8]
         self.figmain:vplt.PlotWidget
         self.figclip:vplt.PlotWidget
+        self.figspec:vplt.PlotWidget
         self.figmain._configure_3d()
         self.figclip._configure_2d()
-
+        self.figspec._configure_2d()
 
         self.clipcolorbar = self.figclip.colorbar(
             position="right",
@@ -34,6 +192,9 @@ class DensityViewer():
             cmap="seismic",
             border_width=0,
             border_color="#000000")
+
+        self.energyviewer = EnergyViewer(self.figspec)
+        self.uvspecviewer = SpectrumViewer(self.figspec)
         
         # self.figclipcolorbar:vplt.ColorBarWidget
         self.viewmain = self.figmain.view
@@ -54,11 +215,14 @@ class DensityViewer():
         self.volume = None
         self.isosurface_1 = None
         self.isosurface_2 = None
-        self.mode = "volume"
+        self.mode = "orbital"
 
         self.wf = None      # loaded wave function. 
         self.cube = None    # Current cube data
         self.dm = None      # density manager object
+
+        self.current_excitation_index = 0
+        self.excitations = []
         
         self.keyops = {
             "W":self.move_plane_up,
@@ -69,8 +233,8 @@ class DensityViewer():
             "Right": self.increase_orbital,
             "Up": self.increase_isovalue,
             "Down": self.decrease_isovalue,
-            "Q": self.switch_visual,
-            "E": self.switch_visual,
+            "Q": self.switch_to_orbital_viewer,
+            "E": self.switch_to_excitation_viewer,
         }
         self.last_operation_time = time.time()
 
@@ -152,12 +316,12 @@ class DensityViewer():
         if not ext:
             self.logger.log("No excitation loaded. Cannot calculate transition density.")
             return 
+        if not ext.check_normalize():
+            self.logger.log("warning: the square norm of this cis vector is smaller than 0.95, result may be inaccurate.")
         t = time.time()
         self.logger.log("Calculating transition density")
         V = self.dm.get_transition_density(ext=ext)
-        a = np.sum(V)
-        a *= self.cube.dx*self.cube.dy*self.cube.dz
-        self.logger.log(f"Summing up all value and multiply differential element: {a}")
+        self.logger.log(f"Excitation {self.current_excitation_index}. ΔE = {ext.e:1.3f}, fosc = {ext.osci:1.3f}, |T| = {ext.T2:1.3f}")
         self.logger.log(f"Time cost: {time.time()-t}")
         return V
 
@@ -169,12 +333,12 @@ class DensityViewer():
         if not ext:
             self.logger.log("No excitation loaded. Cannot calculate transition difference density.")
             return 
+        if not ext.check_normalize():
+            self.logger.log("warning: the square norm of this cis vector is smaller than 0.95, result may be inaccurate.")
         t = time.time()
         self.logger.log("Calculating difference density")
         V = self.dm.get_difference_density(ext=ext)
-        a = np.sum(V)
-        a *= self.cube.dx*self.cube.dy*self.cube.dz
-        self.logger.log(f"Summing up all value and multiply differential element: {a}")
+        self.logger.log(f"Excitation {self.current_excitation_index}. ΔE = {ext.e:1.3f}, fosc = {ext.osci:1.3f}, |T| = {ext.T2:1.3f}")
         self.logger.log(f"Time cost: {time.time()-t}")
         return V
 
@@ -247,6 +411,16 @@ class DensityViewer():
         self.viewclip.add(self.clipimage)
         self.figclip.view.camera.aspect = 1
         self.figclip.view.camera.set_range()
+
+    def draw_initial_energy_level(self):
+        if self.mode == "orbital":
+            self.energyviewer.plot_energy(self.wf.energys)
+            self.energyviewer.move_to_energy(self.current_orbital_idx)
+    
+    def draw_initial_spectrum(self):
+        if len(self.excitations) > 0:
+            self.uvspecviewer.plot_spectrum(self.excitations)
+            self.uvspecviewer.move_to_peak(self.current_excitation_index)
   
     def draw_molecule(self):
         """draw the molecule"""
@@ -269,6 +443,7 @@ class DensityViewer():
         self.build_initial_isosurface()
         self.build_initial_volume()
         self.draw_initial_clip_image()
+        self.draw_initial_energy_level()
         self.draw_molecule()
         self.draw_density()
         self.logger.log("Scene initialized!")
@@ -307,24 +482,6 @@ class DensityViewer():
     def rotate_plane_yminus(self):
         self.modify_clipplane(-1/180*pi,0,0,0,0,0)
 
-    def increase_orbital(self):
-        orbitalidx = min(self.wf.C.shape[1] - 1, self.current_orbital_idx + 1)
-        self.get_orbital_cube(orbitalidx)
-        var = self.volume.clim[1]
-        self.volume.set_data(self.cube.data.transpose(2,1,0).copy(), clim = (-var, var))
-        self.isosurface_1.set_data(self.cube.data, color = self.isosurface_1.color)
-        self.isosurface_2.set_data(self.cube.data, color = self.isosurface_2.color)
-        self.figure.update()
-
-    def decrease_orbital(self):
-        orbitalidx = max(0, self.current_orbital_idx - 1)
-        self.get_orbital_cube(orbitalidx)
-        var = self.volume.clim[1]
-        self.volume.set_data(self.cube.data.transpose(2,1,0).copy(), clim = (-var, var))
-        self.isosurface_1.set_data(self.cube.data, color = self.isosurface_1.color)
-        self.isosurface_2.set_data(self.cube.data, color = self.isosurface_2.color)
-        self.figure.update()
-
     def increase_isovalue(self):
         _, var = self.volume.clim
         self.volume.set_data(self.cube.data.transpose(2,1,0).copy(), clim = (-var*1.28, var*1.28))
@@ -344,6 +501,7 @@ class DensityViewer():
         self.figure.update()
 
     def switch_visual(self):
+        return 
         if self.mode == "volume":
             self.volume.parent = None
             self.viewmain.add(self.isosurface_1)
@@ -355,6 +513,57 @@ class DensityViewer():
             self.viewmain.add(self.volume)
             self.mode = "volume"
         self.logger.log(f"Current display mode: {self.mode}")
+
+    def increase_orbital(self):
+        if self.mode == "orbital":
+            self.current_orbital_idx = min(self.wf.C.shape[1] - 1, self.current_orbital_idx + 1)
+            self.cube.data = self.get_orbital_cube(self.current_orbital_idx)
+            self.energyviewer.move_to_energy(self.current_orbital_idx)
+        elif self.mode == "excitation":
+            self.current_excitation_index = min(len(self.excitations)-1, self.current_excitation_index + 1)
+            self.cube.data = self.get_transition_density(self.excitations[self.current_excitation_index])
+            self.uvspecviewer.move_to_peak(self.current_excitation_index)
+        var = self.volume.clim[1]
+        self.volume.set_data(self.cube.data.transpose(2,1,0).copy(), clim = (-var, var))
+        self.isosurface_1.set_data(self.cube.data, color = self.isosurface_1.color)
+        self.isosurface_2.set_data(self.cube.data, color = self.isosurface_2.color)
+        self.figure.update()
+
+    def decrease_orbital(self):
+        if self.mode == "orbital":
+            self.current_orbital_idx = max(0, self.current_orbital_idx - 1)
+            self.cube.data = self.get_orbital_cube(self.current_orbital_idx)
+            self.energyviewer.move_to_energy(self.current_orbital_idx)
+        elif self.mode == "excitation":
+            self.current_excitation_index = max(0, self.current_excitation_index - 1)
+            self.cube.data = self.get_difference_density(self.excitations[self.current_excitation_index])
+            self.uvspecviewer.move_to_peak(self.current_excitation_index)
+        var = self.volume.clim[1]
+        self.volume.set_data(self.cube.data.transpose(2,1,0).copy(), clim = (-var, var))
+        self.isosurface_1.set_data(self.cube.data, color = self.isosurface_1.color)
+        self.isosurface_2.set_data(self.cube.data, color = self.isosurface_2.color)
+        self.figure.update()
+
+    def switch_to_excitation_viewer(self):
+        if len(self.excitations) == 0:
+            self.logger.log("No excitations loaded!")
+            return
+        self.mode = "excitation"
+        self.cube.data = self.get_difference_density(self.excitations[self.current_excitation_index])
+        var = max(abs(self.cube.data.min()), self.cube.data.max())
+        self.volume.set_data(self.cube.data.transpose(2,1,0), clim = (-var, var))
+        self.energyviewer.detach_everything()
+        if self.uvspecviewer.uvspec == None:
+            self.uvspecviewer.plot_spectrum(self.excitations)
+        self.uvspecviewer.recover_everything()
+
+    def switch_to_orbital_viewer(self):
+        self.mode = "orbital"
+        self.cube.data = self.get_orbital_cube(self.current_orbital_idx)
+        var = max(abs(self.cube.data.min()), self.cube.data.max())
+        self.volume.set_data(self.cube.data.transpose(2,1,0), clim = (-var, var))
+        self.uvspecviewer.detach_everything()
+        self.energyviewer.recover_everything()
 
     def on_key_press(self, event):
         s = event._key._names[0]
@@ -389,25 +598,10 @@ class DensityViewer():
         self.figure.update()
 
 
-if __name__ == "__main__":
-
-    # filename1 = 'cubefiles\\benzene.cistp03.cube'
-    filename1 = 'moldenfiles\\7far-h.molden'
-    viewer = DensityViewer()
-    viewer.read(filename1)
-    exts = read_cis_output("moldenfiles\\7far-h.out")
-    ext = exts[0]
-    viewer.initialize_scene()
-
-    # V1 = viewer.get_orbital_cube(19).copy()
-    # V2 = viewer.get_orbital_cube(21).copy()
-    # V3 = V1 * V2
-    # V1 = viewer.get_orbital_cube(20).copy()
-    # V2 = viewer.get_orbital_cube(22).copy()
-    # V3+= V1 * V2 * -1
-    # viewer.volume.set_data(V3.transpose(2,1,0), clim = (V3.min(), V3.max()))
-    V3 = viewer.get_difference_density(ext)
-    var = max(abs(V3.min()), V3.max())
-    viewer.volume.set_data(V3.transpose(2,1,0), clim = (-var, var))
-
-    viewer.run()
+import os
+os.environ["NUMBA_ENABLE_CUDASIM"] = "1"
+filename1 = 'moldenfiles\\struct28_hh.molden'
+viewer = DensityViewer()
+viewer.read(filename1)
+viewer.initialize_scene()
+viewer.run()

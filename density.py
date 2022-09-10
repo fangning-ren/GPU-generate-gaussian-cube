@@ -1,19 +1,16 @@
-import enum
 from numba import cuda
 import numpy as np
-import copy
-from read_files import Excitation, MoldenWavefunction
-from read_files import GaussianCube
-from utils import *
 
-import time
-import matplotlib.pyplot as plt
+from read_files import MoldenWavefunction
+from read_files import GaussianCube
+from convert_to_orca import Excitation
+from utils import *
 
 
 class DensityManager:
     """This class is for calculating cube files and matrixs """
     # 这个类负责从波函数生成cube
-    def __init__(self, wf:MoldenWavefunction, cube:GaussianCube):
+    def __init__(self, wf:MoldenWavefunction, cube:GaussianCube, use_cuda = True):
         self.cube = cube
         self.wf = wf
         self.C = self.wf.C
@@ -21,15 +18,18 @@ class DensityManager:
 
         self.C_raveled = self.wf.get_raveled_C()
         self.gtfs = self.wf.get_raveled_gtf()
-        self.cuda_block_dim = (32, 32, 32)
+        self.threadsperblock = CUDA_BLOCK_SHAPE
+        self.get_orbital_value = self.get_orbital_value_cpu
 
-        self.C_raveled = cuda.to_device(self.C_raveled)
-        self.gtf_N0 = cuda.to_device(self.gtfs[0])  # GTF norm coefficient
-        self.gtf_aa = cuda.to_device(self.gtfs[1])  # GTF contract
-        self.gtf_ps = cuda.to_device(self.gtfs[2])  # GTF center
-        self.gtf_pw = cuda.to_device(self.gtfs[3])  # GTF power, angular momentum
-        self.gtf_ai = cuda.to_device(self.gtfs[4])  # GTF atom index
-        self.gtfs = (self.gtf_N0, self.gtf_aa, self.gtf_ps, self.gtf_pw, self.gtf_ai)
+        if use_cuda:
+            self.C_raveled = cuda.to_device(self.C_raveled)
+            self.gtf_N0 = cuda.to_device(self.gtfs[0])  # GTF norm coefficient
+            self.gtf_aa = cuda.to_device(self.gtfs[1])  # GTF contract
+            self.gtf_ps = cuda.to_device(self.gtfs[2])  # GTF center
+            self.gtf_pw = cuda.to_device(self.gtfs[3])  # GTF power, angular momentum
+            self.gtf_ai = cuda.to_device(self.gtfs[4])  # GTF atom index
+            self.gtfs = (self.gtf_N0, self.gtf_aa, self.gtf_ps, self.gtf_pw, self.gtf_ai)
+            self.get_orbital_value = self.get_orbital_value_gpu
     
     def get_density_matrix(self):
         D_mo = np.diag(self.wf.occupys, k = 0)
@@ -37,18 +37,26 @@ class DensityManager:
         self.D = D
         return D
 
-    def get_orbital_value(self, orbidx):
+    def get_orbital_value_gpu(self, orbidx):
         """param overlap: the calculated data will overlap the original grid data without returning"""
         coeffs = np.ascontiguousarray(self.wf.C_raveled[:,orbidx]) # cuda kernel cannot accept non-continueous array slices
         coeffs = cuda.to_device(coeffs)
         dV = cuda.device_array(self.cube.shape, dtype=np.float32)
-        threadsperblock = (8, 8, 8)
+        threadsperblock = self.threadsperblock
         blockspergrid_x = np.ceil(self.cube.shape[0] / threadsperblock[0]).astype(np.int32)
         blockspergrid_y = np.ceil(self.cube.shape[1] / threadsperblock[1]).astype(np.int32)
         blockspergrid_z = np.ceil(self.cube.shape[2] / threadsperblock[2]).astype(np.int32)
         blockspergrid = (blockspergrid_x, blockspergrid_y, blockspergrid_z)
-        orbital_value_kernel[blockspergrid, threadsperblock](dV, *self.cube.minpos, *self.cube.grid_size, *self.gtfs, coeffs)
+        orbital_value_kernel_v2[blockspergrid, threadsperblock](dV, *self.cube.minpos, *self.cube.grid_size, *self.gtfs, coeffs)
         return dV.copy_to_host()
+
+    def get_orbital_value_cpu(self, orbidx):
+        """CPU version for grid data calculation. do not use because it is very slow"""
+        coeffs = np.ascontiguousarray(self.wf.C_raveled[:,orbidx]) # cuda kernel cannot accept non-continueous array slices
+        dV = np.empty(self.cube.shape, dtype = np.float32)
+        orbital_value_kernel_cpu(dV, *self.cube.minpos, *self.cube.grid_size, *self.gtfs, coeffs)
+        return dV
+
 
     def get_electron_density(self):
         """returns the 3d array"""
@@ -59,7 +67,7 @@ class DensityManager:
         coef = cuda.to_device(np.ascontiguousarray(occus[nzeroidxs]))
         dV = cuda.device_array(self.cube.shape, dtype=np.float32)
 
-        threadsperblock = (8, 8, 8)
+        threadsperblock = self.threadsperblock
         blockspergrid_x = np.ceil(self.cube.shape[0] / threadsperblock[0]).astype(np.int32)
         blockspergrid_y = np.ceil(self.cube.shape[1] / threadsperblock[1]).astype(np.int32)
         blockspergrid_z = np.ceil(self.cube.shape[2] / threadsperblock[2]).astype(np.int32)
@@ -94,7 +102,7 @@ class DensityManager:
         ibra = cuda.to_device(ibra)
         coef = cuda.to_device(coef)
 
-        threadsperblock = (8, 8, 8)
+        threadsperblock = self.threadsperblock
         blockspergrid_x = np.ceil(self.cube.shape[0] / threadsperblock[0]).astype(np.int32)
         blockspergrid_y = np.ceil(self.cube.shape[1] / threadsperblock[1]).astype(np.int32)
         blockspergrid_z = np.ceil(self.cube.shape[2] / threadsperblock[2]).astype(np.int32)
@@ -160,7 +168,7 @@ class DensityManager:
         ibra = cuda.to_device(ibra)
         coef = cuda.to_device(coef)
 
-        threadsperblock = (8, 8, 8)
+        threadsperblock = self.threadsperblock
         blockspergrid_x = np.ceil(self.cube.shape[0] / threadsperblock[0]).astype(np.int32)
         blockspergrid_y = np.ceil(self.cube.shape[1] / threadsperblock[1]).astype(np.int32)
         blockspergrid_z = np.ceil(self.cube.shape[2] / threadsperblock[2]).astype(np.int32)

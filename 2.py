@@ -1,7 +1,10 @@
+
 from numba import cuda, float32
 import numpy as np
 
-
+# Controls threads per block and shared memory usage.
+# The computation will be done on blocks of TPBxTPB elements.
+TPB = 16
 
 @cuda.jit
 def matmul(A, B, C):
@@ -14,11 +17,7 @@ def matmul(A, B, C):
             tmp += A[i, k] * B[k, j]
         C[i, j] = tmp
 
-# Controls threads per block and shared memory usage.
-# The computation will be done on blocks of TPBxTPB elements.
-TPB = 16
-
-@cuda.jit
+@cuda.jit(debug = True, opt = False)
 def fast_matmul(A, B, C):
     # Define an array in the shared memory
     # The size and type of the arrays must be known at compile time
@@ -55,19 +54,26 @@ def fast_matmul(A, B, C):
 
     C[x, y] = tmp
 
-
-A = np.random.rand(1000, 1000).astype(np.float32)
-B = np.random.rand(1000, 1000).astype(np.float32)
-C = np.random.rand(1000, 1000).astype(np.float32)
-
-gdim = (8, 8)
-bdim = (128, 128)
+import math
 import time
-matmul[bdim, gdim](A, B, C)
-t = time.time()
-matmul[bdim, gdim](A, B, C)
-print(time.time() - t)
+
 
 t = time.time()
-C = A @ B
-print(time.time() - t)
+A = np.random.random((2000, 2000)).astype(np.float32)
+B = np.random.random((2000, 2000)).astype(np.float32)
+t = time.time()
+A @ B
+print(time.time()-t)
+A = cuda.to_device(np.random.random((2048, 2048)).astype(np.float32))
+B = cuda.to_device(np.random.random((2048, 2048)).astype(np.float32))
+C = cuda.to_device(np.empty_like(A))
+
+tpb = (TPB,TPB)
+bpgx = math.ceil(A.shape[0] / tpb[0])
+bpgy = math.ceil(A.shape[1] / tpb[1])
+
+fast_matmul[(bpgx, bpgy), tpb](A,B,C)
+t = time.time()
+fast_matmul[(bpgx, bpgy), tpb](A,B,C)
+cuda.synchronize()
+print(time.time()-t)

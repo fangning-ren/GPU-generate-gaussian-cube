@@ -4,6 +4,7 @@ import re
 
 
 class Molecule:
+    "Class for store a molecule. Can be loaded from .xyz files."
     def __init__(self, elems, coords, bonds = []):
         self.elems = elems
         self.coords = np.array(coords, dtype = np.float32)
@@ -25,8 +26,47 @@ class Molecule:
                     self.bonds.append((i, j))
                     self.bondpts.append([self.coords[i], self.coords[j]])
         self.bondpts = np.array(self.bondpts)
-    
+
+    def from_xyz(self, fname):
+        f = open(fname, "r")
+        lines = f.readlines()
+        f.close()
+        curlineidx = 0
+        elements, datas = [], []
+        while curlineidx < len(lines) and lines[curlineidx].strip():
+            natom = int(lines[curlineidx])
+            datastr = lines[curlineidx+2:curlineidx+2+natom]
+            data = np.empty((natom, 3), dtype = float)
+            element = []
+            for i, line in enumerate(datastr):
+                temp = line.split()
+                if len(temp) != 4:
+                    continue
+                a, x, y, z = temp
+                element.append(a)
+                data[i][0] = float(x)
+                data[i][1] = float(y)
+                data[i][2] = float(z)
+            elements.append(element)
+            datas.append(data)
+            curlineidx = curlineidx+2+natom
+        self.elems = elements[-1]
+        self.coords = datas[-1]
+        self.form_bonds()
+
+    def to_xyz(self, fname):
+        element = self.elems
+        data = self.coords
+        f = open(fname, "w")
+        f.write(str(len(element)) + "\n")
+        f.write("\n")
+        for i in range(len(element)):
+            f.write(f"{element[i]}    {data[i][0]:>12.8f}    {data[i][1]:>12.8f}    {data[i][2]:>12.8f}\n")
+        f.close()
+
+
 class MoldenWavefunction:
+    "Class for store the wavefunction. Can be loaded from .molden files."
     def __init__(self, fp:str):
 
         self.logger = MyLogger()
@@ -251,7 +291,9 @@ class MoldenWavefunction:
         self.logger.log(f"Total {self.molecule.n_atom} atom detected.")
         self.logger.log(f"Total {len(self.energys)} orbitals detected.")
 
+
 class GaussianCube:
+    "Class for store the cube data. Can be loaded from gaussian cube files."
     def __init__(self, fp = None, data = None, molecule = None, grid_size = (0.01, 0.01, 0.01), minpos = (0.0, 0.0, 0.0)):
         self.molecule = molecule
         self.logger = MyLogger()
@@ -360,3 +402,142 @@ class GaussianCube:
                 curlinestart = f.tell()
                 line = f.readline()
                 iline += 1
+
+
+class Excitation:
+    "Class for store the excitation data"
+    def __init__(self):
+        self.orb1 = [1,]
+        self.orb2 = [2,]
+        self.cisc = [1.,]
+        self.osci = 1.0
+        self.e = 1.0
+        self.wlen = 45.5640
+        self.Tx, self.Ty, self.Tz, self.T2 = 0.0, 0.0, 0.0, 0.0
+        self.vTx, self.vTy, self.vTz, self.vT2 = 0.0, 0.0, 0.0, 0.0
+
+    def check_normalize(self):
+        sum2 = sum([c**2 for c in self.cisc])
+        return sum2**0.5 > 0.95
+
+    def filter_coefficients(self, threshold = 0.01, normalize = False):
+        self.orb1 = np.array(self.orb1, dtype = np.int32)
+        self.orb2 = np.array(self.orb2, dtype = np.int32)
+        self.cisc = np.array(self.cisc, dtype = np.float32)
+        idxs = np.nonzero(self.cisc > threshold)[0]
+        self.orb1 = self.orb1[idxs]
+        self.orb2 = self.orb2[idxs]
+        self.cisc = self.cisc[idxs]
+        l = len(self.cisc)
+        if normalize:
+            sum2 = sum([c**2 for c in self.cisc])
+            sum1 = sum2**0.5
+            self.cisc = [c / sum1 for c in self.cisc]
+
+
+def read_cis_output(fp:str):
+    "Function for reading TeraChem TDDFT/CIS outputs. Returns a list of excitation objects."
+    with open(fp, "r", errors="ignore") as f:
+        for i in range(9999999):
+            line = f.readline()
+            if line.find("Transition dipole moments") != -1:
+                curlinestart = f.tell()
+                break
+        # reading transition dipole
+        f.seek(curlinestart)
+        dipoledata = []
+        patt = r'(?P<ridx>\d+) +(?P<Tx>-?\d+\.\d+) +(?P<Ty>-?\d+\.\d+) +(?P<Tz>-?\d+\.\d+) +(?P<T>-?\d+\.\d+)'
+        for i in range(9999999):
+            line = f.readline()
+            if line.find("Transition dipole moments between excited states:") != -1:
+                curlinestart = f.tell()
+                break
+            result = re.search(patt, line)
+            if not result:
+                continue
+            result = result.groupdict()
+            dipoledata.append([float(result["Tx"]), float(result["Ty"]), float(result["Tz"]), float(result["T"])**2])
+
+        # skipping infos
+        f.seek(curlinestart)
+        for i in range(9999999):
+            curlinestart = f.tell()
+            line = f.readline()
+            if line.find("Velocity transition dipole moments") != -1:
+                curlinestart = f.tell()
+                break
+
+        # reading velocity dipole
+        f.seek(curlinestart)
+        vpoledata = []
+        patt = r'(?P<ridx>\d+) +(?P<Tx>-?\d+\.\d+) +(?P<Ty>-?\d+\.\d+) +(?P<Tz>-?\d+\.\d+) +(?P<T>-?\d+\.\d+)'
+        for i in range(9999999):
+            line = f.readline()
+            if line.find("Magnetic transition dipole moments and rotational strengths") != -1:
+                curlinestart = f.tell()
+                break
+            result = re.search(patt, line)
+            if not result:
+                continue
+            result = result.groupdict()
+            vpoledata.append([float(result["Tx"]), float(result["Ty"]), float(result["Tz"]), float(result["T"])**2])
+
+        # skipping infos
+        f.seek(curlinestart)
+        for i in range(9999999):
+            curlinestart = f.tell()
+            line = f.readline()
+            if line.find("Largest CI coefficients") != -1:
+                break
+
+        # reading CI coefficient
+        f.seek(curlinestart)
+        occus, virts, coeffs = [], [], []
+        patt = r"(?P<occu>\d+) +-> +(?P<virt>\d+) +:.+ +(?P<coeff>-?\d+\.\d+)"
+        for i in range(9999999):
+            curlinestart = f.tell()
+            line = f.readline()
+            if line.find("Final Excited State Results:") != -1:
+                break
+            if line.find("Largest CI coefficients") != -1:
+                occus.append([])
+                virts.append([])
+                coeffs.append([])
+            result = re.search(patt, line)
+            if not result:
+                continue
+            result = result.groupdict()
+            occus[-1].append(int(result["occu"])-1)
+            virts[-1].append(int(result["virt"])-1)
+            coeffs[-1].append(float(result["coeff"]))
+        f.seek(curlinestart)
+        eexts, oscis = [], []
+        for i in range(1000):
+            line = f.readline()
+            if not line:
+                break
+            patt = r"(?P<ridx>\d+) +(?P<tene>-?\d+\.\d+) +(?P<eext>-?\d+\.\d+) +(?P<osci>-?\d+\.\d+) +(?P<s2>-?\d+\.\d+)"
+            result = re.search(patt, line)
+            if not result:
+                continue
+            eexts.append(float(result["eext"]) / 27.21139664130791)
+            oscis.append(float(result["osci"]))
+    
+    if not (len(dipoledata) == len(occus) == len(virts) == len(coeffs) == len(eexts) == len(oscis)):
+        raise ValueError(f"Errors found in reading excitation info: {len(occus)} single excitation determinants, {len(coeffs)} CIS coefficients, {len(eexts)} excitation energy, {len(oscis)} oscillator strenth, and {len(dipoledata)} transition dipole moments.")
+
+    excitations = []
+    for i in range(len(eexts)):
+        e = Excitation()
+        e.cisc = coeffs[i]
+        e.e = eexts[i]
+        if not (len(coeffs[i]) == len(occus[i]) == len(virts[i])):
+            raise ValueError(f"Errors found in reading excitation {i}. It contains {len(coeffs[i])} CIS coefficients and {len(occus[i])} transition orbitals.")
+        e.osci = oscis[i]
+        e.orb1 = occus[i]
+        e.orb2 = virts[i]
+        e.Tx, e.Ty, e.Tz, e.T2 = dipoledata[i]
+        e.vTx, e.vTy, e.vTz, e.vT2 = vpoledata[i]
+        e.wlen = 45.56337117 / e.e
+        excitations.append(e)
+    return excitations
