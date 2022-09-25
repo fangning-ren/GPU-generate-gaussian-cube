@@ -1,7 +1,178 @@
-from utils import *
-from basis import *
-import re
+import numpy as np
 import sys
+import re
+from math import sqrt, factorial, pi
+
+class MyLogger:
+    def __init__(self):
+        pass
+
+    def log(self, s):
+        print("\n" + s, end = "")
+
+    def log_add(self, s):
+        print(s, end = "")
+
+S_convert = np.matrix([
+    [1.00000000,],
+], dtype = np.float32)
+
+P_convert = np.matrix([
+    [1.00000000, 0.00000000, 0.00000000],
+    [0.00000000, 1.00000000, 0.00000000],
+    [0.00000000, 0.00000000, 1.00000000],
+], dtype = np.float32)
+
+D_convert = np.matrix([
+    # D 0, D+1, D-1, D+2, D-2, S
+    [-0.50000000, 0.00000000, 0.00000000, 0.86602540, 0.00000000], #xx
+    [-0.50000000, 0.00000000, 0.00000000,-0.86602540, 0.00000000], #yy
+    [ 1.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000], #zz
+    [ 0.00000000, 0.00000000, 0.00000000, 0.00000000, 1.00000000], #xy
+    [ 0.00000000, 1.00000000, 0.00000000, 0.00000000, 0.00000000], #xz
+    [ 0.00000000, 0.00000000, 1.00000000, 0.00000000, 0.00000000], #yz
+], dtype = np.float32).T
+
+# This is the conversion matrix for TeraChem to ORCA. Orca's F+3 and G+4 orbitals should be multiplied by -1 compared with the table provided by Multiwfn.
+# For other programs it is possible to multiply the last two columns of the conversion matrix by -1
+# Don't ask me why i know this
+F_convert = np.matrix([
+    # F+0, F+1, F-1, F+2, F-2, F+3, F-3, px, py, pz
+    [ 0.00000000,-0.61237244, 0.00000000, 0.00000000, 0.00000000,-0.79056942, 0.00000000], #xxx
+    [ 0.00000000, 0.00000000,-0.61237244, 0.00000000, 0.00000000, 0.00000000, 0.79056942], #yyy
+    [ 1.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000], #zzz
+    [ 0.00000000,-0.27386127, 0.00000000, 0.00000000, 0.00000000, 1.06066017, 0.00000000], #xyy
+    [ 0.00000000, 0.00000000,-0.27386127, 0.00000000, 0.00000000, 0.00000000,-1.06066017], #xxy
+    [-0.67082039, 0.00000000, 0.00000000, 0.86602540, 0.00000000, 0.00000000, 0.00000000], #xxz
+    [ 0.00000000, 1.09544511, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000], #xzz
+    [ 0.00000000, 0.00000000, 1.09544511, 0.00000000, 0.00000000, 0.00000000, 0.00000000], #yzz
+    [-0.67082039, 0.00000000, 0.00000000,-0.86602540, 0.00000000, 0.00000000, 0.00000000], #yyz
+    [ 0.00000000, 0.00000000, 0.00000000, 0.00000000, 1.00000000, 0.00000000, 0.00000000], #xyz
+], dtype = np.float32).T
+
+G_convert = np.matrix([
+    # G+0,G+1,G-1G+2,G-2,G+3,G-3,G+4,G-4, D+0, D+1, D-1, D+2, D-2, S
+    [ 1.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000], #zzzz
+    [ 0.00000000, 0.00000000, 1.19522860, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000], #yzzz
+    [-0.87831006, 0.00000000, 0.00000000,-0.98198050, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000], #yyzz
+    [ 0.00000000, 0.00000000,-0.89642145, 0.00000000, 0.00000000, 0.00000000,-0.79056941, 0.00000000, 0.00000000], #yyyz
+    [ 0.37500000, 0.00000000, 0.00000000, 0.55901699, 0.00000000, 0.00000000, 0.00000000,-0.73950997, 0.00000000], #yyyy
+    [ 0.00000000, 1.19522860, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000], #xzzz
+    [ 0.00000000, 0.00000000, 0.00000000, 0.00000000, 1.13389341, 0.00000000, 0.00000000, 0.00000000, 0.00000000], #xyzz
+    [ 0.00000000,-0.40089186, 0.00000000, 0.00000000, 0.00000000,-1.06066017, 0.00000000, 0.00000000, 0.00000000], #xyyz
+    [ 0.00000000, 0.00000000, 0.00000000, 0.00000000,-0.42257712, 0.00000000, 0.00000000, 0.00000000, 1.11803398], #xyyy
+    [-0.87831006, 0.00000000, 0.00000000, 0.98198050, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000], #xxzz
+    [ 0.00000000, 0.00000000,-0.40089186, 0.00000000, 0.00000000, 0.00000000, 1.06066017, 0.00000000, 0.00000000], #xxyz
+    [ 0.21957751, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 1.29903810, 0.00000000], #xxyy
+    [ 0.00000000,-0.89642145, 0.00000000, 0.00000000, 0.00000000, 0.79056941, 0.00000000, 0.00000000, 0.00000000], #xxxz
+    [ 0.00000000, 0.00000000, 0.00000000, 0.00000000,-0.42257712, 0.00000000, 0.00000000, 0.00000000,-1.11803398], #xxxy
+    [ 0.37500000, 0.00000000, 0.00000000,-0.55901699, 0.00000000, 0.00000000, 0.00000000, 0.73950997, 0.00000000], #xxxx        
+], dtype = np.float32).T
+
+H_convert = np.eye(11, 21, dtype = np.float32)
+
+def build_reverse_matrix(M):
+    D = np.empty_like(M, dtype = np.float32)
+    D[:,:] = M
+    n_car, n_sph = D.shape[1], D.shape[0]
+    D = np.concatenate((D, np.random.random((n_car-n_sph, n_car)).astype(np.float32)), axis = 0)
+
+    for i in range(0, n_car - n_sph):
+        b = np.zeros(n_car, dtype = np.float32)
+        b[n_sph+i] = 1
+        v = np.linalg.solve(D, b)
+        v /= np.linalg.norm(v)
+        D[n_sph+i] = v
+
+    return D.I[:,:n_sph]
+
+D_inverse = build_reverse_matrix(D_convert)
+F_inverse = build_reverse_matrix(F_convert)
+G_inverse = build_reverse_matrix(G_convert)
+H_inverse = np.eye(21, 11, dtype = np.float32)
+
+class GTF:
+    def __init__(self, p, c, a, i, j, k):
+        self.c, self.a, self.p = c, a, p
+        self.i, self.j, self.k = i, j, k
+        self.__calculate_normalize_coeff()
+
+    def __call__(self, x, y, z):
+        dx, dy, dz = x-self.p[0], y-self.p[1], z-self.p[2]
+        return self.c * (dx**self.i * dy**self.j * dz**self.k) * np.exp(-self.a * (dx**2 + dy**2 + dz**2))
+
+    def __calculate_normalize_coeff(self):
+        L = self.i + self.j + self.k
+        i = L // 3
+        j = i + (L % 3) // 2
+        k = L - i - j
+        N0 = (2*self.a/pi)**0.75 * sqrt((8*self.a)**L*factorial(i)*factorial(j)*factorial(k)/(factorial(2*i)*factorial(2*j)*factorial(2*k)))
+        N1 = (2*self.a/pi)**0.75 * sqrt((8*self.a)**L*factorial(self.i)*factorial(self.j)*factorial(self.k)/(factorial(2*self.i)*factorial(2*self.j)*factorial(2*self.k)))
+        self.c = self.c * N1 / N0
+
+
+class GTO:
+    def __init__(self, position, contracts, coefficients, px, py, pz, atomidx):
+        self.c = coefficients
+        self.a = contracts
+        self.p = position
+        self.px = px
+        self.py = py
+        self.pz = pz
+        self.atomidx = atomidx
+        self.funcs = [GTF(self.p, c, a, px, py, pz) for c, a in zip(self.c, self.a)]
+
+    def __call__(self, x, y, z):
+        a = 0
+        for f in self.funcs:
+            a += f(x, y, z)
+        return a
+
+
+class GTOShell:
+    def __init__(self, orbital_type = "s", contracts = [1.0,], coefficients = [1.0,], position = [0.0, 0.0, 0.0], atomidx = 0, gtotype = "spherical"):
+        self.s = orbital_type
+        self.c = np.array(coefficients, dtype = np.float32)
+        self.a = np.array(contracts, dtype = np.float32)
+        self.p = np.array(position, dtype = np.float32)
+        self.atomidx = atomidx
+        self.type = gtotype
+        self.gtos = []
+        self.generate_orbitals()
+
+    def generate_orbitals(self):
+        if self.s == "s":
+            self.gtos.append(GTO(self.p, self.a, self.c, 0, 0, 0, self.atomidx))
+        elif self.s == "p":
+            self.gtos.append(GTO(self.p, self.a, self.c, 1, 0, 0, self.atomidx))
+            self.gtos.append(GTO(self.p, self.a, self.c, 0, 1, 0, self.atomidx))
+            self.gtos.append(GTO(self.p, self.a, self.c, 0, 0, 1, self.atomidx))
+        elif self.s == "d":
+            self.gtos.append(GTO(self.p, self.a, self.c, 2, 0, 0, self.atomidx))
+            self.gtos.append(GTO(self.p, self.a, self.c, 0, 2, 0, self.atomidx))
+            self.gtos.append(GTO(self.p, self.a, self.c, 0, 0, 2, self.atomidx))
+            self.gtos.append(GTO(self.p, self.a, self.c, 1, 1, 0, self.atomidx))
+            self.gtos.append(GTO(self.p, self.a, self.c, 1, 0, 1, self.atomidx))
+            self.gtos.append(GTO(self.p, self.a, self.c, 0, 1, 1, self.atomidx))
+        elif self.s == "f":
+            idx = [3,0,0,1,2,2,1,0,0,1]
+            idy = [0,3,0,2,1,0,0,1,2,1]
+            idz = [0,0,3,0,0,1,2,2,1,1]
+            for x, y, z in zip(idx, idy, idz):
+                self.gtos.append(GTO(self.p, self.a, self.c, x, y, z, self.atomidx))
+        elif self.s == "g":
+            idx = [0,0,0,0,0,1,1,1,1,2,2,2,3,3,4]
+            idy = [0,1,2,3,4,0,1,2,3,0,1,2,0,1,0]
+            idz = [4,3,2,1,0,3,2,1,0,2,1,0,1,0,0]
+            for x, y, z in zip(idx, idy, idz):
+                self.gtos.append(GTO(self.p, self.a, self.c, x, y, z, self.atomidx))
+        elif self.s == "h":
+            idx = [0,0,0,0,0,0,1,1,1,1,1,2,2,2,2,3,3,3,4,4,5]
+            idy = [0,1,2,3,4,5,0,1,2,3,4,0,1,2,3,0,1,2,0,1,0]
+            idz = [5,4,3,2,1,0,4,3,2,1,0,3,2,1,0,2,1,0,1,0,0]
+            for x, y, z in zip(idx, idy, idz):
+                self.gtos.append(GTO(self.p, self.a, self.c, x, y, z, self.atomidx))
+
 
 elemlabel = {1: 'H', 30: 'Zn', 63: 'Eu', 2: 'He', 31: 'Ga', 64: 'Gd', 3: 'Li', 32: 'Ge', 65: 'Tb', 4: 'Be', 33: 'As', 66: 'Dy', 5: 'B', 34: 'Se', 67: 'Ho', 6: 'C', 35: 'Br', 68: 'Er', 36: 'Kr', 69: 'Tm', 37: 'Rb', 70: 'Yb', 7: 'N', 38: 'Sr', 71: 'Lu', 8: 'O', 39: 'Y', 72: 'Hf', 9: 'F', 40: 'Zr', 73: 'Ta', 10: 'Ne', 41: 'Nb', 74: 'W', 11: 'Na', 42: 'Mo', 75: 'Re', 12: 'Mg', 43: 'Tc', 76: 'Os', 13: 'Al', 44: 'Ru', 77: 'Ir', 14: 'Si', 45: 'Rh', 78: 'Pt', 15: 'P', 46: 'Pd', 79: 'Au', 16: 'S', 47: 'Ag', 80: 'Hg', 17: 'Cl', 48: 'Cd', 81: 'Tl', 18: 'Ar', 49: 'In', 82: 'Pb', 19: 'K', 50: 'Sn', 83: 'Bi', 20: 'Ca', 51: 'Sb', 84: 'Po', 21: 'Sc', 52: 'Te', 85: 'At', 22: 'Ti', 53: 'I', 86: 'Rn', 23: 'V', 54: 'Xe', 87: 'Fr', 24: 'Cr', 55: 'Cs', 88: 'Ra', 25: 'Mn', 56: 'Ba', 89: 'Ac', 57: 'La', 90: 'Th', 26: 'Fe', 58: 'Ce', 91: 'Pa', 59: 'Pr', 92: 'U', 27: 'Co', 60: 'Nd', 93: 'Np', 61: 'Pm', 94: 'Pu', 28: 'Ni', 62: 'Sm', 95: 'Am', 29: 'Cu', 96: 'Cm'}
 elemradius = {1: 0.50, 30: 1.22, 63: 1.98, 2: 0.28, 31: 1.22, 64: 1.96, 3: 1.28, 32: 1.2, 65: 1.94, 4: 0.96, 33: 1.19, 66: 1.92, 5: 0.84, 34: 1.2, 67: 1.92, 6: 0.76, 35: 1.2, 68: 1.89, 36: 1.16, 69: 1.9, 37: 2.2, 70: 1.87, 7: 0.71, 38: 1.95, 71: 1.87, 8: 0.66, 39: 1.9, 72: 1.75, 9: 0.57, 40: 1.75, 73: 1.7, 10: 0.58, 41: 1.64, 74: 1.62, 11: 1.66, 42: 1.54, 75: 1.51, 12: 1.41, 43: 1.47, 76: 1.44, 13: 1.21, 44: 1.46, 77: 1.41, 14: 1.11, 45: 1.42, 78: 1.36, 15: 1.07, 46: 1.39, 79: 1.36, 16: 1.05, 47: 1.45, 80: 1.32, 17: 1.02, 48: 1.44, 81: 1.45, 18: 1.06, 49: 1.42, 82: 1.46, 19: 2.03, 50: 1.39, 83: 1.48, 20: 1.76, 51: 1.39, 84: 1.4, 21: 1.7, 52: 1.38, 85: 1.5, 22: 1.6, 53: 1.39, 86: 1.5, 23: 1.53, 54: 1.4, 87: 2.6, 24: 1.39, 55: 2.44, 88: 2.21, 25: 1.39, 56: 2.15, 89: 2.15, 57: 2.07, 90: 2.06, 26: 1.32, 58: 2.04, 91: 2.0, 59: 2.03, 92: 1.96, 27: 1.26, 60: 2.01, 93: 1.9, 61: 1.99, 94: 1.87, 28: 1.24, 62: 1.98, 95: 1.8, 29: 1.32, 96: 1.69}
@@ -71,7 +242,6 @@ class Molecule:
             f.write(f"{element[i]}    {data[i][0]:>12.8f}    {data[i][1]:>12.8f}    {data[i][2]:>12.8f}\n")
         f.close()
 
-
 class MoldenWavefunction:
     "Class for store the wavefunction. Can be loaded from .molden files."
     def __init__(self, fp:str):
@@ -90,6 +260,7 @@ class MoldenWavefunction:
         self.spins = []
         self.homo = -1
         self.lumo = -1
+        self.originaltype = "spherical"
 
         self.temp = None    # temp data for storing the raveled GTF array
         self.convert_mats = {"s":S_convert, "p":P_convert, "d":D_convert, "f":F_convert, "g":G_convert, "h":H_convert}
@@ -172,10 +343,12 @@ class MoldenWavefunction:
         if n_cat == self.C.shape[1]:
             self.logger.log(f"Cartesian basis set detected. Total {n_cat} gtos with {len(self.gtoshells)} shells.")
             self.C = self.C.T
+            self.originaltype = "cartesian"
             return
         elif n_sph != self.C.shape[1]:
             raise ValueError(f"The number of MO coefficnents are supposed to be {n_cat} for cartesian basis or {n_sph} for spherical basis, not {self.C.shape[1]}")
         self.logger.log(f"Spherical basis set detected. Total {n_sph} gtos with {len(self.gtoshells)} shells.")
+        self.originaltype = "spherical"
         sphb, catb = 0, 0
         newC = np.zeros((self.C.shape[0], n_cat), dtype = np.float32)
         for i, shell in enumerate(self.gtoshells):
@@ -358,119 +531,6 @@ class MoldenWavefunction:
         self.logger.log(f"Total {self.molecule.n_atom} atom detected.")
         self.logger.log(f"Total {len(self.energys)} orbitals detected.")
 
-
-class GaussianCube:
-    "Class for store the cube data. Can be loaded from gaussian cube files."
-    def __init__(self, fp = None, data = None, molecule = None, grid_size = (0.01, 0.01, 0.01), minpos = (0.0, 0.0, 0.0)):
-        self.molecule = molecule
-        self.logger = MyLogger()
-        self.logger.log(f"Load gaussian cube file {fp}.")
-
-        self.xmin = 0.0
-        self.ymin = 0.0
-        self.zmin = 0.0
-        self.nx = 1
-        self.ny = 1
-        self.nz = 1
-        self.dx = 1.0
-        self.dy = 1.0
-        self.dz = 1.0
-        self.data = None
-        self.xmax, self.ymax, self.zmax = self.xmin+self.nx*self.dx, self.ymin+self.ny*self.dy, self.zmin+self.nz*self.dz
-
-        if isinstance(fp, str):
-            self.read_cube(fp)
-        elif fp == None:
-            if not isinstance(data, np.ndarray) and isinstance(molecule, Molecule):
-                raise ValueError("The grid data must be specified if there is no input grid files.")
-            self.data = data
-            self.xmin, self.ymin, self.zmin = minpos
-            self.nx, self.ny, self.nz = data.shape
-            self.dx, self.dy, self.dz = grid_size
-            self.xmax, self.ymax, self.zmax = self.xmin+self.nx*self.dx, self.ymin+self.ny*self.dy, self.zmin+self.nz*self.dz
-            if not isinstance(molecule, Molecule):
-                self.logger.log("warning: no corresponding molecule.")
-                self.molecule = Molecule([], [])
-        self.minpos = (self.xmin, self.ymin, self.zmin)
-        self.maxpos = (self.xmax, self.ymax, self.zmax)
-        self.grid_size = (self.dx, self.dy, self.dz)
-        self.shape = self.data.shape
-
-    def __getitem__(self, _i):
-        return self.data[_i]
-
-    def read_block(self, f, bsize:int):
-        while True:
-            chunk = f.read(bsize)
-            if not chunk:
-                break
-            yield chunk
-    
-    def read_cube_data(self, f, fpos:int):
-        self.data = np.zeros((self.nx, self.ny, self.nz), dtype = np.float32)
-        n_linebreak = (self.nz + 5) // 6
-        bsize = 14 * self.nz + n_linebreak
-        f.seek(fpos, 0)
-        nchk = self.nx * self.ny
-        nnchk = nchk // 10
-        for idx, chk in enumerate(self.read_block(f, bsize)):
-            x = idx // self.ny
-            y = idx % self.ny
-            data = ",".join(chk.split())
-            if not data:
-                break
-            self.data[x,y] = np.fromstring(data, dtype = np.float32, sep = ",")
-            if idx % nnchk == 0:
-                self.logger.log(f"Reading data {idx / nchk * 100:>3.2f}%")
-        self.logger.log(f"Reading finished. Total {self.data.size:d} data points loaded.")
-
-    def read_cube(self, filename):
-        elems, coords = [], []
-        with open(filename, "r", errors = "ignore") as f:
-            iline = 1
-            line = f.readline()
-            while line:
-                if iline < 3:
-                    pass
-                elif iline == 3:
-                    n_atom, xmin, ymin, zmin = line.split()
-                    n_atom = abs(int(n_atom))
-                    self.xmin = float(xmin)
-                    self.ymin = float(ymin)
-                    self.zmin = float(zmin)
-                    coords = np.zeros((n_atom, 3), dtype = np.float32)
-                    self.logger.log(f"There are {n_atom} atoms in this molecule.")
-                elif iline == 4:
-                    xdim, dx, _, _ = line.split()
-                    self.nx, self.dx = int(xdim), float(dx)
-                    self.logger.log(f"X-axis: {self.nx} grids with interval {self.dx:>1.6f} Angstrom")
-                elif iline == 5:
-                    ydim, _, dy, _ = line.split()
-                    self.ny, self.dy = int(ydim), float(dy)
-                    self.logger.log(f"Y-axis: {self.ny} grids with interval {self.dy:>1.6f} Angstrom")
-                elif iline == 6:
-                    zdim, _, _, dz = line.split()
-                    self.nz, self.dz = int(zdim), float(dz)
-                    self.logger.log(f"Z-axis: {self.nz} grids with interval {self.dz:>1.6f} Angstrom")
-                    self.logger.log(f"Grid point number: {self.nx*self.ny*self.nz}")
-                    self.logger.log(f"Space range: ({self.xmin:>3.3f},{self.ymin:>3.3f},{self.zmin:>3.3f})->({self.xmin+self.nx*self.dx:>3.3f},{self.ymin+self.ny*self.dy:>3.3f},{self.zmin+self.nz*self.dz:>3.3f})")
-                    self.xmax, self.ymax, self.zmax = self.xmin+self.nx*self.dx, self.ymin+self.ny*self.dy, self.zmin+self.nz*self.dz
-                else:
-                    tmp = line.split()
-                    if len(tmp) == 5:
-                        elems.append(elemlabel[int(tmp[0])])
-                        coords[iline-7] = np.array((float(tmp[2]), float(tmp[3]), float(tmp[4])), dtype = np.float32)
-                    elif len(tmp) == 6:
-                        self.molecule = Molecule(elems, coords)
-                        self.read_cube_data(f, curlinestart)
-                        break
-                    else:
-                        pass      
-                curlinestart = f.tell()
-                line = f.readline()
-                iline += 1
-
-
 class Excitation:
     "Class for store the excitation data"
     def __init__(self):
@@ -609,11 +669,229 @@ def read_cis_output(fp:str):
         excitations.append(e)
     return excitations
 
+def write_multiwfn_readable_orca_output_file(fname:str, extlist):
+    """Generate a ORCA TDDFT/CIS type output file from TeraChem TDDFT/CIS output. So that can be readed by Multiwfn"""
+    occus, virts = [], []
+    for ext in extlist:
+        occus += list(ext.orb1)
+        virts += list(ext.orb2)
+    
+    f = open(fname, "w")
+    f.write("""
+    
+                                 *****************
+                                 * O   R   C   A *
+                                 *****************
+
+                                            #,                                       
+                                            ###                                      
+                                            ####                                     
+                                            #####                                    
+                                            ######                                   
+                                           ########,                                 
+                                     ,,################,,,,,                         
+                               ,,#################################,,                 
+                          ,,##########################################,,             
+                       ,#########################################, ''#####,          
+                    ,#############################################,,   '####,        
+                  ,##################################################,,,,####,       
+                ,###########''''           ''''###############################       
+              ,#####''   ,,,,##########,,,,          '''####'''          '####       
+            ,##' ,,,,###########################,,,                        '##       
+           ' ,,###''''                  '''############,,,                           
+         ,,##''                                '''############,,,,        ,,,,,,###''
+      ,#''                                            '''#######################'''  
+     '                                                          ''''####''''         
+             ,#######,   #######,   ,#######,      ##                                
+            ,#'     '#,  ##    ##  ,#'     '#,    #''#        ######   ,####,        
+            ##       ##  ##   ,#'  ##            #'  '#       #        #'  '#        
+            ##       ##  #######   ##           ,######,      #####,   #    #        
+            '#,     ,#'  ##    ##  '#,     ,#' ,#      #,         ##   #,  ,#        
+             '#######'   ##     ##  '#######'  #'      '#     #####' # '####'        
+
+    \n""")
+    f.write(""" 
+       ***********************************************************
+       *                    TeraChem v1.9-2021.10-dev            *
+       *                 Hg Version:                             *
+       *                   Development Version                   *
+       *           Chemistry at the Speed of Graphics!           *
+       ***********************************************************
+       *        The original data is generated by TeraChem       *
+       *             Converted by read_excitation.py             *
+       ***********************************************************
+
+------------------------------------------------------------------------------
+            THIS OUTPUT ONLY CONTAINS EXCITATION CI COEFFICIENTS
+                        OTHER INFORMATION ARE INVALID
+------------------------------------------------------------------------------
+    \n""")
+
+    f.write(f"""
+------------------------------------------------------------------------------
+                        ORCA TD-DFT/TDA CALCULATION
+------------------------------------------------------------------------------
+
+Input orbitals are from        ... {fname}.gbw
+CI-vector output               ... {fname}.cis
+Tamm-Dancoff approximation     ... operative
+CIS-Integral strategy          ... AO-integrals
+Integral handling              ... AO integral Direct
+Max. core memory used          ... 2048 MB
+Reference state                ... RHF
+Generation of triplets         ... off
+Follow IRoot                   ... off
+Number of operators            ... 1
+Orbital ranges used for CIS calculation:
+ Operator 0:  Orbitals  0...{max(occus)}  to {min(virts)}...1631
+XAS localization array:
+ Operator 0:  Orbitals  -1... -1
+    \n""")
+
+    f.write("""
+     *** TD-DFT CALCULATION INITIALIZED ***
+
+------------------------
+DAVIDSON-DIAGONALIZATION
+------------------------
+
+Dimension of the eigenvalue problem            ... 131072
+Number of roots to be determined               ...      5
+Maximum size of the expansion space            ...     50
+Maximum number of iterations                   ...    100
+Convergence tolerance for the residual         ...    2.500e-07
+Convergence tolerance for the energies         ...    2.500e-07
+Orthogonality tolerance                        ...    1.000e-14
+Level Shift                                    ...    0.000e+00
+Constructing the preconditioner                ... o.k.
+Building the initial guess                     ... o.k.
+Number of trial vectors determined             ...     50
+
+
+                       ****Iteration    0****
+
+   Memory handling for direct AO based CIS:
+   Memory per vector needed      ...   128 MB
+   Memory needed                 ...  2048 MB
+   Memory available              ...  2048 MB
+   Number of vectors per batch   ...    16
+   Number of batches             ...     2
+   Time for densities:            0.000
+   Time for RI-J (Direct):        0.000
+   Time for K (COSX):             0.000
+   Time for XC-Integration:       0.000
+   Time for Sigma-Completion:     0.000
+   Time for densities:            0.000
+   Time for RI-J (Direct):        0.000
+   Time for K (COSX):             0.000
+   Time for XC-Integration:       0.000
+   Time for Sigma-Completion:     0.000
+   Size of expansion space: 15
+   Lowest Energy          :     0.000000000000
+   Maximum Energy change  :     0.000000000000 (vector 1)
+   Maximum residual norm  :     0.000000000000
+
+
+      *** CONVERGENCE OF RESIDUAL NORM REACHED ***
+
+Storing the converged CI vectors               ... hello_world.cis
+
+                 *** DAVIDSON DONE ***
+
+Total time for solving the CIS problem:   702.861sec
+    \n""")
+    f.write("""
+------------------------------------
+TD-DFT/TDA EXCITED STATES (SINGLETS)
+------------------------------------
+
+the weight of the individual excitations are printed if larger than 1.0e-02""")
+    for i, ext in enumerate(extlist):
+        ext:Excitation
+        f.write(f"\nSTATE  {i+1}:  E=   {ext.e:.6f} au      {ext.e*27.211:>.3f} eV    {ext.e*219474.6:>6.1f} cm**-1 <S**2> =   0.000000\n")
+        for orb1, orb2, coeff in zip(ext.orb1, ext.orb2, ext.cisc):
+            f.write(f"   {orb1}a -> {orb2}a  :   {coeff**2:>3.6f} (c={coeff:>3.8f})\n")
+
+    f.write("""
+-----------------------------
+TD-DFT/TDA-EXCITATION SPECTRA
+-----------------------------
+
+Center of mass = (  0.0000,  0.0000,  3.4488)
+Calculating the Dipole integrals                  ... done
+Transforming integrals                            ... done
+Calculating the Linear Momentum integrals         ... done
+Transforming integrals                            ... done
+Calculating angular momentum integrals            ... done
+Transforming integrals                            ... done
+    """)
+    f.write("""
+-----------------------------------------------------------------------------
+         ABSORPTION SPECTRUM VIA TRANSITION ELECTRIC DIPOLE MOMENTS
+-----------------------------------------------------------------------------
+State   Energy    Wavelength  fosc         T2        TX        TY        TZ  
+        (cm-1)      (nm)                 (au**2)    (au)      (au)      (au) 
+-----------------------------------------------------------------------------
+""")
+    for i, ext in enumerate(extlist):
+        ext:Excitation
+        f.write(f"   {i+1:<2d}   {ext.e*219474.6: <6.1f}    {ext.wlen: <3.1f}   {ext.osci: <2.9f}   {ext.T2: <2.5f}  {ext.Tx: <2.5f}   {ext.Ty: <2.5f}   {ext.Tz :<2.5f}\n")
+
+    f.write("""
+-----------------------------------------------------------------------------
+         ABSORPTION SPECTRUM VIA TRANSITION VELOCITY DIPOLE MOMENTS
+-----------------------------------------------------------------------------
+State   Energy    Wavelength   fosc        P2         PX        PY        PZ  
+        (cm-1)      (nm)                 (au**2)     (au)      (au)      (au) 
+-----------------------------------------------------------------------------
+""")
+    for i, ext in enumerate(extlist):
+        ext:Excitation
+        f.write(f"   {i+1:>2d}   {ext.e*219474.6:>6.1f}    {ext.wlen:>3.1f}   {ext.osci:>2.9f}   {ext.vT2:>2.5f}  {ext.vTx:>2.5f}   {ext.vTy:>2.5f}   {ext.vTz:>2.5f}\n")
+    f.write("""
+Total run time:      0.000 sec
+
+           *** ORCA-CIS/TD-DFT FINISHED WITHOUT ERROR ***
+
+Maximum memory used throughout the entire CIS-calculation: 1024.0 MB
+
+-----------------------
+CIS/TD-DFT TOTAL ENERGY
+-----------------------
+
+    E(SCF)  =      0.000000000 Eh
+    DE(CIS) =      0.000000000 Eh (Root  1)
+    ----------------------------- ---------
+    E(tot)  =      0.000000000 Eh
+
+
+
+-------------------------   ----------------
+Dispersion correction           -0.000000000
+-------------------------   ----------------
+
+
+-------------------------   --------------------
+FINAL SINGLE POINT ENERGY         0.000000000000
+-------------------------   --------------------
+
+
+
+                             ****ORCA TERMINATED NORMALLY****
+TOTAL RUN TIME: 0 days 0 hours 0 minutes 0 seconds 0 msec
+    """)
+
+
 if __name__ == "__main__":
-    import os
-    fnames = os.listdir(r"C:\Users\fangn\Desktop\research\zwit-result-corrected")
-    fnames = [fname for fname in fnames if fname.endswith("cartesian.molden")]
-    for fname in fnames:
-        wf = MoldenWavefunction(r"C:\Users\fangn\Desktop\research\zwit-result-corrected" + "\\" + fname)
-        wf.convert_to_spherical()
-        wf.write(r"C:\Users\fangn\Desktop\research\zwit-result-corrected" + "\\" + fname.replace("cartesian", "spherical"))
+    fname = sys.argv[1]
+    if fname.find(".molden") != -1:
+        wf = MoldenWavefunction(fname)
+        if wf.originaltype == "cartesian":
+            wf.convert_to_spherical()
+            wf.write(fname.replace(".molden", "-spherical.molden"))
+        elif wf.originaltype == "spherical":
+            wf.convert_to_cartesian()
+            wf.write(fname.replace(".molden", "-cartesian.molden"))
+    elif fname.find(".out") != -1:
+        exts = read_cis_output(sys.argv[1])
+        write_multiwfn_readable_orca_output_file(sys.argv[1].replace(".out", "-orca.out"), exts)

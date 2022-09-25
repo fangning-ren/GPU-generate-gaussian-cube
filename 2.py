@@ -1,79 +1,75 @@
-
-from numba import cuda, float32
 import numpy as np
+from math import sqrt, factorial, pi
 
-# Controls threads per block and shared memory usage.
-# The computation will be done on blocks of TPBxTPB elements.
-TPB = 16
+S_convert = np.matrix([
+    [1.00000000,],
+], dtype = np.float32)
 
-@cuda.jit
-def matmul(A, B, C):
-    """Perform square matrix multiplication of C = A * B
-    """
-    i, j = cuda.grid(2)
-    if i < C.shape[0] and j < C.shape[1]:
-        tmp = 0.
-        for k in range(A.shape[1]):
-            tmp += A[i, k] * B[k, j]
-        C[i, j] = tmp
+P_convert = np.matrix([
+    [1.00000000, 0.00000000, 0.00000000],
+    [0.00000000, 1.00000000, 0.00000000],
+    [0.00000000, 0.00000000, 1.00000000],
+], dtype = np.float32)
 
-@cuda.jit(debug = True, opt = False)
-def fast_matmul(A, B, C):
-    # Define an array in the shared memory
-    # The size and type of the arrays must be known at compile time
-    sA = cuda.shared.array(shape=(TPB, TPB), dtype=float32)
-    sB = cuda.shared.array(shape=(TPB, TPB), dtype=float32)
+D_convert = np.matrix([
+    # D 0, D+1, D-1, D+2, D-2, S
+    [-0.50000000, 0.00000000, 0.00000000, 0.86602540, 0.00000000], #xx
+    [-0.50000000, 0.00000000, 0.00000000,-0.86602540, 0.00000000], #yy
+    [ 1.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000], #zz
+    [ 0.00000000, 0.00000000, 0.00000000, 0.00000000, 1.00000000], #xy
+    [ 0.00000000, 1.00000000, 0.00000000, 0.00000000, 0.00000000], #xz
+    [ 0.00000000, 0.00000000, 1.00000000, 0.00000000, 0.00000000], #yz
+], dtype = np.float32)
 
-    x, y = cuda.grid(2)
+# 这是专用orca的转换矩阵。相对于multiwfn提供的表格，orca的F+3和G+4轨道的相位是反着的。因此对于其他程序可能要把转移矩阵的后两列乘以-1
+F_convert = np.matrix([
+    # F+0, F+1, F-1, F+2, F-2, F+3, F-3, px, py, pz
+    [ 0.00000000,-0.61237244, 0.00000000, 0.00000000, 0.00000000,-0.79056942, 0.00000000], #xxx
+    [ 0.00000000, 0.00000000,-0.61237244, 0.00000000, 0.00000000, 0.00000000, 0.79056942], #yyy
+    [ 1.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000], #zzz
+    [ 0.00000000,-0.27386127, 0.00000000, 0.00000000, 0.00000000, 1.06066017, 0.00000000], #xyy
+    [ 0.00000000, 0.00000000,-0.27386127, 0.00000000, 0.00000000, 0.00000000,-1.06066017], #xxy
+    [-0.67082039, 0.00000000, 0.00000000, 0.86602540, 0.00000000, 0.00000000, 0.00000000], #xxz
+    [ 0.00000000, 1.09544511, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000], #xzz
+    [ 0.00000000, 0.00000000, 1.09544511, 0.00000000, 0.00000000, 0.00000000, 0.00000000], #yzz
+    [-0.67082039, 0.00000000, 0.00000000,-0.86602540, 0.00000000, 0.00000000, 0.00000000], #yyz
+    [ 0.00000000, 0.00000000, 0.00000000, 0.00000000, 1.00000000, 0.00000000, 0.00000000], #xyz
+], dtype = np.float32)
+G_convert = np.matrix([
+    # G+0,G+1,G-1G+2,G-2,G+3,G-3,G+4,G-4, D+0, D+1, D-1, D+2, D-2, S
+    [ 1.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000], #zzzz
+    [ 0.00000000, 0.00000000, 1.19522860, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000], #yzzz
+    [-0.87831006, 0.00000000, 0.00000000,-0.98198050, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000], #yyzz
+    [ 0.00000000, 0.00000000,-0.89642145, 0.00000000, 0.00000000, 0.00000000,-0.79056941, 0.00000000, 0.00000000], #yyyz
+    [ 0.37500000, 0.00000000, 0.00000000, 0.55901699, 0.00000000, 0.00000000, 0.00000000,-0.73950997, 0.00000000], #yyyy
+    [ 0.00000000, 1.19522860, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000], #xzzz
+    [ 0.00000000, 0.00000000, 0.00000000, 0.00000000, 1.13389341, 0.00000000, 0.00000000, 0.00000000, 0.00000000], #xyzz
+    [ 0.00000000,-0.40089186, 0.00000000, 0.00000000, 0.00000000,-1.06066017, 0.00000000, 0.00000000, 0.00000000], #xyyz
+    [ 0.00000000, 0.00000000, 0.00000000, 0.00000000,-0.42257712, 0.00000000, 0.00000000, 0.00000000, 1.11803398], #xyyy
+    [-0.87831006, 0.00000000, 0.00000000, 0.98198050, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000], #xxzz
+    [ 0.00000000, 0.00000000,-0.40089186, 0.00000000, 0.00000000, 0.00000000, 1.06066017, 0.00000000, 0.00000000], #xxyz
+    [ 0.21957751, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 1.29903810, 0.00000000], #xxyy
+    [ 0.00000000,-0.89642145, 0.00000000, 0.00000000, 0.00000000, 0.79056941, 0.00000000, 0.00000000, 0.00000000], #xxxz
+    [ 0.00000000, 0.00000000, 0.00000000, 0.00000000,-0.42257712, 0.00000000, 0.00000000, 0.00000000,-1.11803398], #xxxy
+    [ 0.37500000, 0.00000000, 0.00000000,-0.55901699, 0.00000000, 0.00000000, 0.00000000, 0.73950997, 0.00000000], #xxxx        
+], dtype = np.float32)
 
-    tx = cuda.threadIdx.x
-    ty = cuda.threadIdx.y
-    bpg = cuda.gridDim.x    # blocks per grid
+D = G_convert.T
+n_car, n_sph = D.shape[1], D.shape[0]
+D = np.concatenate((D, np.random.random((n_car-n_sph, n_car)).astype(np.float32)), axis = 0)
+# D[n_sph:,n_sph:] = np.eye(n_car-n_sph, dtype = np.float32)
+print(D)
 
-    if x >= C.shape[0] and y >= C.shape[1]:
-        # Quit if (x, y) is outside of valid C boundary
-        return
+for i in range(0, n_car - n_sph):
+    b = np.zeros(n_car, dtype = np.float32)
+    b[n_sph+i] = 1
+    # D[n_sph+i] = np.random.random(D.shape[1]).astype(np.float32)
+    v = np.linalg.solve(D, b)
+    v /= np.linalg.norm(v)
+    D[n_sph+i] = v
 
-    # Each thread computes one element in the result matrix.
-    # The dot product is chunked into dot products of TPB-long vectors.
-    tmp = 0.
-    for i in range(bpg):
-        # Preload data into shared memory
-        sA[tx, ty] = A[x, ty + i * TPB]
-        sB[tx, ty] = B[tx + i * TPB, y]
-
-        # Wait until all threads finish preloading
-        cuda.syncthreads()
-
-        # Computes partial product on the shared memory
-        for j in range(TPB):
-            tmp += sA[tx, j] * sB[j, ty]
-
-        # Wait until all threads finish computing
-        cuda.syncthreads()
-
-    C[x, y] = tmp
-
-import math
-import time
-
-
-t = time.time()
-A = np.random.random((2000, 2000)).astype(np.float32)
-B = np.random.random((2000, 2000)).astype(np.float32)
-t = time.time()
-A @ B
-print(time.time()-t)
-A = cuda.to_device(np.random.random((2048, 2048)).astype(np.float32))
-B = cuda.to_device(np.random.random((2048, 2048)).astype(np.float32))
-C = cuda.to_device(np.empty_like(A))
-
-tpb = (TPB,TPB)
-bpgx = math.ceil(A.shape[0] / tpb[0])
-bpgy = math.ceil(A.shape[1] / tpb[1])
-
-fast_matmul[(bpgx, bpgy), tpb](A,B,C)
-t = time.time()
-fast_matmul[(bpgx, bpgy), tpb](A,B,C)
-cuda.synchronize()
-print(time.time()-t)
+print(D)
+a = np.arange(n_sph)
+b = a @ G_convert.T
+c = b @ D.I[:,:n_sph]
+print(a, b, c)

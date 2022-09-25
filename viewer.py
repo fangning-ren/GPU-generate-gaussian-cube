@@ -252,11 +252,10 @@ class DensityViewer():
         return Colormap(colors)
 
     # Calculation functions
-    def get_plane_data(self, ngrid = 256, clipplane = None):
+    def get_plane_data(self, ngrid = 512, clipplane = None):
         clipplane = self.clipplane if not isinstance(clipplane, np.ndarray) else clipplane
         p0, pv = self.clipplane[-1]
-        plen = min(self.cube.dx*self.cube.nx, self.cube.dy*self.cube.ny,self.cube.dz*self.cube.nz)
-        V = self.cube.data
+        plen = max(self.cube.dx*self.cube.nx, self.cube.dy*self.cube.ny,self.cube.dz*self.cube.nz)
         mp = get_plane_values(p0, pv, plen, ngrid, self.cube.data, *self.cube.minpos, *self.cube.grid_size)
         return mp
 
@@ -342,6 +341,48 @@ class DensityViewer():
         self.logger.log(f"Time cost: {time.time()-t}")
         return V
 
+    def get_hole(self, ext:Excitation = None):
+        """Calculate the hole distribution"""
+        if not self.dm:
+            self.logger.log("No wavefunction loaded. Cannot calculate.")
+            return 
+        if not ext:
+            self.logger.log("No excitation loaded. Cannot calculate.")
+            return 
+        if not ext.check_normalize():
+            self.logger.log("warning: the square norm of this cis vector is smaller than 0.95, result may be inaccurate.")
+        t = time.time()
+        self.logger.log("Calculating hole distribution")
+        V = self.dm.get_hole(ext=ext)
+        self.logger.log(f"Excitation {self.current_excitation_index}. ΔE = {ext.e:1.3f}, fosc = {ext.osci:1.3f}, |T| = {ext.T2:1.3f}")
+        self.logger.log(f"Time cost: {time.time()-t}")
+        return -V
+
+    def get_electron(self, ext:Excitation = None):
+        """Calculate the electron distribution"""
+        if not self.dm:
+            self.logger.log("No wavefunction loaded. Cannot calculate.")
+            return 
+        if not ext:
+            self.logger.log("No excitation loaded. Cannot calculate.")
+            return 
+        if not ext.check_normalize():
+            self.logger.log("warning: the square norm of this cis vector is smaller than 0.95, result may be inaccurate.")
+        t = time.time()
+        self.logger.log("Calculating electron distribution")
+        V = self.dm.get_electron(ext=ext)
+        self.logger.log(f"Excitation {self.current_excitation_index}. ΔE = {ext.e:1.3f}, fosc = {ext.osci:1.3f}, |T| = {ext.T2:1.3f}")
+        self.logger.log(f"Time cost: {time.time()-t}")
+        return +V
+
+    def get_hole_and_electron(self, ext:Excitation):
+        """This function is mainly used for adjusting visulization patterns"""
+        V1 = self.get_hole(ext)
+        V2 = self.get_electron(ext)
+        Vid = np.random.randint(2, size = V1.shape, dtype = np.uint8)
+        V1[Vid==1] = V2[Vid==1]
+        return V1
+
     # Initialization functions       
     def read(self, data):
         if isinstance(data, GaussianCube):
@@ -361,6 +402,7 @@ class DensityViewer():
             self.get_orbital_cube(0)
         else:
             raise ValueError("No corrected data loaded. Expect cube file or molden file.")
+        
 
     def build_initial_isosurface(self):
         """build the isosurface visual before add it to the scene"""
@@ -391,10 +433,10 @@ class DensityViewer():
         data = self.cube.data
         scaletp = (self.cube.dx, self.cube.dy, self.cube.dz)
         transtp = (self.cube.xmin, self.cube.ymin, self.cube.zmin)
-        var = (data.max() - data.min()) / 2
+        var = max(1e-4, (data.max() - data.min()) / 2)
         self.current_delta_var = var * 0.05
         var = var * 0.25
-        self.volume = scene.visuals.Volume(data.transpose(2,1,0).copy(), interpolation="nearest", cmap = cm, method = "translucent", clim = (-var, var), threshold=0)
+        self.volume = scene.visuals.Volume(data.transpose(2,1,0).copy(), interpolation="linear", cmap = cm, method = "translucent", clim = (-var, var), threshold=0)
         self.volume.transform = scene.STTransform(scale = scaletp, translate=transtp)
         self.alphafilter = Alpha(0.8)
         self.volume.attach(self.alphafilter)
@@ -431,7 +473,8 @@ class DensityViewer():
         
         edges = scene.visuals.Line(edgs, color = (0, 1, 0, 1), width = 5, connect = "segments")
         atoms = scene.visuals.Markers(pos=a.coords, size = 10)
-        texts = scene.visuals.Text(text = a.elems, pos = a.coords, method = "gpu")
+        colors = [elemcolors[c] if c in elemcolors else (0.5, 0.5, 0.0, 1.0) for c in a.elems]
+        texts = scene.visuals.Text(text = a.elems, pos = a.coords, color = colors, method = "gpu", font_size=500)
         self.viewmain.add(atoms)
         self.viewmain.add(edges)
         self.viewmain.add(texts)
@@ -521,7 +564,7 @@ class DensityViewer():
             self.energyviewer.move_to_energy(self.current_orbital_idx)
         elif self.mode == "excitation":
             self.current_excitation_index = min(len(self.excitations)-1, self.current_excitation_index + 1)
-            self.cube.data = self.get_transition_density(self.excitations[self.current_excitation_index])
+            self.cube.data = self.get_difference_density(self.excitations[self.current_excitation_index])
             self.uvspecviewer.move_to_peak(self.current_excitation_index)
         var = self.volume.clim[1]
         self.volume.set_data(self.cube.data.transpose(2,1,0).copy(), clim = (-var, var))
@@ -597,11 +640,3 @@ class DensityViewer():
         self.volume.set_data(dV.transpose(2,1,0).copy(), clim = (-var, var))
         self.figure.update()
 
-
-import os
-os.environ["NUMBA_ENABLE_CUDASIM"] = "1"
-filename1 = 'moldenfiles\\struct28_hh.molden'
-viewer = DensityViewer()
-viewer.read(filename1)
-viewer.initialize_scene()
-viewer.run()

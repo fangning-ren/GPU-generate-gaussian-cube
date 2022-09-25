@@ -1,4 +1,4 @@
-from numba import cuda, njit, float32, int32
+from numba import njit, float32, int32
 import numpy as np
 from math import exp, sqrt
 
@@ -9,7 +9,12 @@ CUDA_THREAD_PER_BLOCK = 512
 TPB = 512
 SPB = 64
 
-
+# 遇到了一些不好办的问题
+# 目前gridfile的计算方法已经达到了numba的极限。需要用更加底层的操作来避免block内线程反复访问相同的参数
+# numba不支持gpu内存管理。其shared array似乎没有起到什么作用。必须要手动编写cuda内核
+# cupy的自定义内核支持。gridfile无法被设置为简单的elemementwise 或是reduction kernel，需要直接写和编译cuda。nvcc编译器必须要微软的clang才能运行
+# clang不能单独下载，必须和visual studio一起下载。而visual studio有十几个G，手机流量遭不住了。
+# 必须等到9月14日，网转过来了以后，才能开始写kernel
 
 class MyLogger:
     def __init__(self):
@@ -20,6 +25,10 @@ class MyLogger:
 
     def log_add(self, s):
         print(s, end = "")
+
+elemlabel = {1: 'H', 30: 'Zn', 63: 'Eu', 2: 'He', 31: 'Ga', 64: 'Gd', 3: 'Li', 32: 'Ge', 65: 'Tb', 4: 'Be', 33: 'As', 66: 'Dy', 5: 'B', 34: 'Se', 67: 'Ho', 6: 'C', 35: 'Br', 68: 'Er', 36: 'Kr', 69: 'Tm', 37: 'Rb', 70: 'Yb', 7: 'N', 38: 'Sr', 71: 'Lu', 8: 'O', 39: 'Y', 72: 'Hf', 9: 'F', 40: 'Zr', 73: 'Ta', 10: 'Ne', 41: 'Nb', 74: 'W', 11: 'Na', 42: 'Mo', 75: 'Re', 12: 'Mg', 43: 'Tc', 76: 'Os', 13: 'Al', 44: 'Ru', 77: 'Ir', 14: 'Si', 45: 'Rh', 78: 'Pt', 15: 'P', 46: 'Pd', 79: 'Au', 16: 'S', 47: 'Ag', 80: 'Hg', 17: 'Cl', 48: 'Cd', 81: 'Tl', 18: 'Ar', 49: 'In', 82: 'Pb', 19: 'K', 50: 'Sn', 83: 'Bi', 20: 'Ca', 51: 'Sb', 84: 'Po', 21: 'Sc', 52: 'Te', 85: 'At', 22: 'Ti', 53: 'I', 86: 'Rn', 23: 'V', 54: 'Xe', 87: 'Fr', 24: 'Cr', 55: 'Cs', 88: 'Ra', 25: 'Mn', 56: 'Ba', 89: 'Ac', 57: 'La', 90: 'Th', 26: 'Fe', 58: 'Ce', 91: 'Pa', 59: 'Pr', 92: 'U', 27: 'Co', 60: 'Nd', 93: 'Np', 61: 'Pm', 94: 'Pu', 28: 'Ni', 62: 'Sm', 95: 'Am', 29: 'Cu', 96: 'Cm'}
+elemradius = {1: 0.50, 30: 1.22, 63: 1.98, 2: 0.28, 31: 1.22, 64: 1.96, 3: 1.28, 32: 1.2, 65: 1.94, 4: 0.96, 33: 1.19, 66: 1.92, 5: 0.84, 34: 1.2, 67: 1.92, 6: 0.76, 35: 1.2, 68: 1.89, 36: 1.16, 69: 1.9, 37: 2.2, 70: 1.87, 7: 0.71, 38: 1.95, 71: 1.87, 8: 0.66, 39: 1.9, 72: 1.75, 9: 0.57, 40: 1.75, 73: 1.7, 10: 0.58, 41: 1.64, 74: 1.62, 11: 1.66, 42: 1.54, 75: 1.51, 12: 1.41, 43: 1.47, 76: 1.44, 13: 1.21, 44: 1.46, 77: 1.41, 14: 1.11, 45: 1.42, 78: 1.36, 15: 1.07, 46: 1.39, 79: 1.36, 16: 1.05, 47: 1.45, 80: 1.32, 17: 1.02, 48: 1.44, 81: 1.45, 18: 1.06, 49: 1.42, 82: 1.46, 19: 2.03, 50: 1.39, 83: 1.48, 20: 1.76, 51: 1.39, 84: 1.4, 21: 1.7, 52: 1.38, 85: 1.5, 22: 1.6, 53: 1.39, 86: 1.5, 23: 1.53, 54: 1.4, 87: 2.6, 24: 1.39, 55: 2.44, 88: 2.21, 25: 1.39, 56: 2.15, 89: 2.15, 57: 2.07, 90: 2.06, 26: 1.32, 58: 2.04, 91: 2.0, 59: 2.03, 92: 1.96, 27: 1.26, 60: 2.01, 93: 1.9, 61: 1.99, 94: 1.87, 28: 1.24, 62: 1.98, 95: 1.8, 29: 1.32, 96: 1.69}
+elemradius = {elemlabel[i]: elemradius[i] for i in elemlabel}
 
 @njit
 def rot(x, y, z, ax, ay, az):
@@ -147,7 +156,8 @@ def orbital_value_kernel_v3(
                 Vijk += s_coeffs[n] * s_normcoeffs[n] * x**s_powers[n,0] * y**s_powers[n,1] * z**s_powers[n,2] * exp(-ar2)    # The most time comsuming part
             V[i,j,k] += Vijk
         cuda.syncthreads()
-               
+        
+        
 @njit
 def orbital_value_kernel_cpu(
     V,               # The volume should be filled
@@ -241,6 +251,7 @@ def density_kernel_v2(
 
 
 def get_plane_values(p0, pv, plen, ngrid, V:np.ndarray, xmin, ymin, zmin, dx, dy, dz):
+    xmax, ymax, zmax = xmin+dx*V.shape[0], ymin+dy*V.shape[1], zmin+dz*V.shape[2]
     pv = pv / np.linalg.norm(pv)
     a, b, c = pv
     if a == b == 0:
@@ -253,43 +264,42 @@ def get_plane_values(p0, pv, plen, ngrid, V:np.ndarray, xmin, ymin, zmin, dx, dy
     p00 = np.linspace(-plen/2, plen/2, ngrid)
     p1s = np.stack((p00,p00,p00), axis = 1) * vx.reshape((1, 3))
     p2s = np.stack((p00,p00,p00), axis = 1) * vy.reshape((1, 3))
-    p0 = np.array(p0)
+    p1s[:,0] = np.clip(p1s[:,0], xmin, xmax - 2*dx)
+    p1s[:,1] = np.clip(p1s[:,1], ymin, ymax - 2*dy)
+    p1s[:,2] = np.clip(p1s[:,2], zmin, zmax - 2*dz)
+    p2s[:,0] = np.clip(p2s[:,0], xmin, xmax - 2*dx)
+    p2s[:,1] = np.clip(p2s[:,1], ymin, ymax - 2*dy)
+    p2s[:,2] = np.clip(p2s[:,2], zmin, zmax - 2*dz)
+    p0 = np.array((np.clip(p0[0], xmin, xmax-2*dx), np.clip(p0[1], ymin, ymax-2*dy), np.clip(p0[2], zmin, zmax-2*dz)))
     mp = np.empty((p1s.shape[0], p2s.shape[0]), dtype=np.float32)
     get_plane_values_kernel(mp, p0, p1s, p2s, V, xmin, ymin, zmin, dx, dy, dz)
     return mp
 
 @njit
-def get_plane_values_kernel(mp:np.ndarray, p0:np.ndarray, p1s:np.ndarray, p2s:np.ndarray, V:np.ndarray, xmin, ymin, zmin, dx, dy, dz):
-    nx, ny, nz = V.shape
+def get_plane_values_kernel(mp, p0, p1s, p2s, V, xmin, ymin, zmin, dx, dy, dz):
     for i, v1 in enumerate(p1s):
         for j, v2 in enumerate(p2s):
             v = v1 + v2 + p0
-            xv, yv, zv = v
-            nxv, nyv, nzv = np.int64(np.round((xv - xmin) // dx)), np.int64(np.round((yv - ymin) // dy)), np.int64(np.round((zv - zmin) // dz))
-            nx0, nx1, tx  = min(nx - 1, max(0, nxv)), min(max(0, nxv + 1), nx - 1), min(1, max(0, ((xv - xmin) / dx - nxv)))
-            ny0, ny1, ty  = min(ny - 1, max(0, nyv)), min(max(0, nyv + 1), ny - 1), min(1, max(0, ((yv - ymin) / dy - nyv)))
-            nz0, nz1, tz  = min(nz - 1, max(0, nzv)), min(max(0, nzv + 1), nz - 1), min(1, max(0, ((zv - zmin) / dz - nzv)))
-            v000, v001, v010, v011 = V[nx0,ny0,nz0], V[nx0,ny0,nz1], V[nx0,ny1,nz0], V[nx0,ny1,nz1]
-            v100, v101, v110, v111 = V[nx1,ny0,nz0], V[nx1,ny0,nz1], V[nx1,ny1,nz0], V[nx1,ny1,nz1]
-            fz00 = v000 * (1 - tz) + v001 * tz
-            fz01 = v010 * (1 - tz) + v011 * tz
-            fz10 = v100 * (1 - tz) + v101 * tz
-            fz11 = v110 * (1 - tz) + v111 * tz
-            fy0 = fz00 * (1 - ty) + fz01 * ty
-            fy1 = fz10 * (1 - ty) + fz11 * ty
-            mp[i,j] = fy0 * (1 - tx) + fy1 * tx
-
-
+            x, y, z = v
+            iv, jv, kv = int((x-xmin)//dx), int((y-ymin)//dy), int((z-zmin)//dz)
+            tx, ty, tz = x%dx/dx, y%dy/dy, z%dz/dz
+            fx1 = (1-tx)*V[iv,jv,kv]+tx*V[iv+1,jv,kv]
+            fx2 = (1-tx)*V[iv,jv+1,kv]+tx*V[iv+1,jv+1,kv]
+            fx3 = (1-tx)*V[iv,jv,kv+1]+tx*V[iv+1,jv,kv+1]
+            fx4 = (1-tx)*V[iv,jv+1,kv+1]+tx*V[iv+1,jv+1,kv+1]
+            fy1 = (1-ty)*fx1+ty*fx2
+            fy2 = (1-ty)*fx3+ty*fx4
+            mp[i,j] = (1-tz)*fy1+tz*fy2
 
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
-    V = np.random.randint(-3, 5, size = (8,8,8))
-    # V[:,:,:25] = -V[:,:,25:]
-    xmin, ymin, zmin = -2, -2, -2
-    dx, dy, dz = 0.9, 0.9, 0.9
+    V = np.random.randint(3, 5, size = (50, 50, 50))
+    V[:,:,:25] = -V[:,:,25:]
+    xmin, ymin, zmin = -1, -1, -1
+    dx, dy, dz = 0.04, 0.04, 0.04
     p0 = np.array([0,0,0])
-    pv = np.array([0.0, 0, 1])
-    plen = 8
+    pv = np.array([-0.01, 0.0, 0.99])
+    plen = 1
     ngrid = 100
 
     mp = get_plane_values(p0, pv, plen, ngrid, V, xmin, ymin, zmin, dx, dy, dz)

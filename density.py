@@ -57,15 +57,12 @@ class DensityManager:
         orbital_value_kernel_cpu(dV, *self.cube.minpos, *self.cube.grid_size, *self.gtfs, coeffs)
         return dV
 
-
-    def get_electron_density(self):
-        """returns the 3d array"""
-        occus = self.wf.occupys
-        nzeroidxs = np.nonzero(occus)[0].astype(np.int32)
-        iket = cuda.to_device(nzeroidxs)
-        ibra = cuda.to_device(nzeroidxs)
-        coef = cuda.to_device(np.ascontiguousarray(occus[nzeroidxs]))
+    def _density_kernel(self, iket, ibra, coef):
+        """A wrapper for setting up the grid density calculation"""
         dV = cuda.device_array(self.cube.shape, dtype=np.float32)
+        iket = cuda.to_device(iket)
+        ibra = cuda.to_device(ibra)
+        coef = cuda.to_device(coef)
 
         threadsperblock = self.threadsperblock
         blockspergrid_x = np.ceil(self.cube.shape[0] / threadsperblock[0]).astype(np.int32)
@@ -75,6 +72,12 @@ class DensityManager:
         density_kernel[blockspergrid, threadsperblock](dV, *self.cube.minpos, *self.cube.grid_size, *self.gtfs, self.C_raveled, iket, ibra, coef)
         cuda.synchronize()
         return dV.copy_to_host()
+
+    def get_electron_density(self):
+        """returns the 3d array"""
+        occus = self.wf.occupys
+        nzeroidxs = np.nonzero(occus)[0].astype(np.int32)
+        return self._density_kernel(nzeroidxs, nzeroidxs, np.ascontiguousarray(occus[nzeroidxs]))
 
     def get_transition_wf(self, ext:Excitation):
         """This function cannot execute as the excited wavefunction is not the eigenfunction of time independent sch. equation"""
@@ -97,19 +100,7 @@ class DensityManager:
             iket[i] = id2
             ibra[i] = id1
             coef[i] = c
-        dV = cuda.device_array(self.cube.shape, dtype=np.float32)
-        iket = cuda.to_device(iket)
-        ibra = cuda.to_device(ibra)
-        coef = cuda.to_device(coef)
-
-        threadsperblock = self.threadsperblock
-        blockspergrid_x = np.ceil(self.cube.shape[0] / threadsperblock[0]).astype(np.int32)
-        blockspergrid_y = np.ceil(self.cube.shape[1] / threadsperblock[1]).astype(np.int32)
-        blockspergrid_z = np.ceil(self.cube.shape[2] / threadsperblock[2]).astype(np.int32)
-        blockspergrid = (blockspergrid_x, blockspergrid_y, blockspergrid_z)
-        density_kernel[blockspergrid, threadsperblock](dV, *self.cube.minpos, *self.cube.grid_size, *self.gtfs, self.C_raveled, iket, ibra, coef)
-        cuda.synchronize()
-        return dV.copy_to_host()
+        return self._density_kernel(iket, ibra, coef)
 
     def get_difference_density_matrix(self, ext:Excitation):
         """the transition density matrix can still be obtained, but the MO coefficients are no longer the eigenvector of the density matrix."""
@@ -127,30 +118,16 @@ class DensityManager:
         tdm -= D
         return self.C @ tdm @ self.C.T
 
-    def get_difference_density(self, ext:Excitation):
+    def get_hole(self, ext:Excitation):
         sparse_tdm = {}
         for i, a, wia in zip(ext.orb1, ext.orb2, ext.cisc):
             for j, b, wjb in zip(ext.orb1, ext.orb2, ext.cisc):
-                if i == j and a != b:
-                    k, v = (a,b), wia*wjb
-                elif a == b and i != j:
-                    k, v = (j,i), wia*wjb
-                else:
+                if not (a == b and i != j):
                     continue
-                if k not in sparse_tdm:
-                    sparse_tdm[k] = v
-                else:
-                    sparse_tdm[k] += v
-
+                k, v = (j,i), wia*wjb
+                sparse_tdm[k] = v if k not in sparse_tdm else sparse_tdm[k] + v
         for i, a, wia in zip(ext.orb1, ext.orb2, ext.cisc):
-            if (i,i) not in sparse_tdm:
-                sparse_tdm[(i,i)] = -wia*wia
-            else:
-                sparse_tdm[(i,i)] -= wia*wia
-            if (a,a) not in sparse_tdm:
-                sparse_tdm[(a,a)] = +wia*wia
-            else:
-                sparse_tdm[(a,a)] += wia*wia
+            sparse_tdm[(i,i)] = wia*wia if (i,i) not in sparse_tdm else sparse_tdm[(i,i)] + wia*wia
 
         tdm_pos = list(sparse_tdm.keys())
         tdm_val = [sparse_tdm[k] for k in tdm_pos]
@@ -163,17 +140,58 @@ class DensityManager:
             iket[i] = id2
             ibra[i] = id1
             coef[i] = c
-        dV = cuda.device_array(self.cube.shape, dtype=np.float32)
-        iket = cuda.to_device(iket)
-        ibra = cuda.to_device(ibra)
-        coef = cuda.to_device(coef)
+        return self._density_kernel(iket, ibra, coef)
 
-        threadsperblock = self.threadsperblock
-        blockspergrid_x = np.ceil(self.cube.shape[0] / threadsperblock[0]).astype(np.int32)
-        blockspergrid_y = np.ceil(self.cube.shape[1] / threadsperblock[1]).astype(np.int32)
-        blockspergrid_z = np.ceil(self.cube.shape[2] / threadsperblock[2]).astype(np.int32)
-        blockspergrid = (blockspergrid_x, blockspergrid_y, blockspergrid_z)
-        density_kernel[blockspergrid, threadsperblock](dV, *self.cube.minpos, *self.cube.grid_size, *self.gtfs, self.C_raveled, iket, ibra, coef)
-        cuda.synchronize()
-        return dV.copy_to_host()
+    def get_electron(self, ext:Excitation):
+        sparse_tdm = {}
+        for i, a, wia in zip(ext.orb1, ext.orb2, ext.cisc):
+            for j, b, wjb in zip(ext.orb1, ext.orb2, ext.cisc):
+                if not (i == j and a != b):
+                    continue
+                k, v = (a,b), wia*wjb
+                sparse_tdm[k] = v if k not in sparse_tdm else sparse_tdm[k] + v
+        for i, a, wia in zip(ext.orb1, ext.orb2, ext.cisc):
+            sparse_tdm[(a,a)] = wia*wia if (a,a) not in sparse_tdm else sparse_tdm[(a,a)] + wia*wia
+
+        tdm_pos = list(sparse_tdm.keys())
+        tdm_val = [sparse_tdm[k] for k in tdm_pos]
+        iket = np.zeros(len(tdm_val), dtype = np.int32)
+        ibra = np.zeros(len(tdm_val), dtype = np.int32)
+        coef = np.zeros(len(tdm_val), dtype = np.float32)
+        for i, tp in enumerate(zip(tdm_pos, tdm_val)):
+            p, c = tp
+            id1, id2 = p
+            iket[i] = id2
+            ibra[i] = id1
+            coef[i] = c
+        return self._density_kernel(iket, ibra, coef)
+
+    def get_difference_density(self, ext:Excitation):
+        sparse_tdm = {}
+        for i, a, wia in zip(ext.orb1, ext.orb2, ext.cisc):
+            for j, b, wjb in zip(ext.orb1, ext.orb2, ext.cisc):
+                if i == j and a != b:
+                    k, v = (a,b), wia*wjb
+                elif a == b and i != j:
+                    k, v = (j,i), wia*wjb
+                else:
+                    continue
+                sparse_tdm[k] = v if k not in sparse_tdm else sparse_tdm[k] + v
+
+        for i, a, wia in zip(ext.orb1, ext.orb2, ext.cisc):
+            sparse_tdm[(i,i)] = -wia*wia if (i,i) not in sparse_tdm else sparse_tdm[(i,i)] - wia*wia
+            sparse_tdm[(a,a)] = +wia*wia if (a,a) not in sparse_tdm else sparse_tdm[(a,a)] + wia*wia
+
+        tdm_pos = list(sparse_tdm.keys())
+        tdm_val = [sparse_tdm[k] for k in tdm_pos]
+        iket = np.zeros(len(tdm_val), dtype = np.int32)
+        ibra = np.zeros(len(tdm_val), dtype = np.int32)
+        coef = np.zeros(len(tdm_val), dtype = np.float32)
+        for i, tp in enumerate(zip(tdm_pos, tdm_val)):
+            p, c = tp
+            id1, id2 = p
+            iket[i] = id2
+            ibra[i] = id1
+            coef[i] = c
+        return self._density_kernel(iket, ibra, coef)
 

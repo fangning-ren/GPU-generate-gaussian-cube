@@ -1,3 +1,4 @@
+from distutils.command.build import build
 import numpy as np
 from math import sqrt, factorial, pi
 
@@ -19,7 +20,7 @@ D_convert = np.matrix([
     [ 0.00000000, 0.00000000, 0.00000000, 0.00000000, 1.00000000], #xy
     [ 0.00000000, 1.00000000, 0.00000000, 0.00000000, 0.00000000], #xz
     [ 0.00000000, 0.00000000, 1.00000000, 0.00000000, 0.00000000], #yz
-], dtype = np.float32)
+], dtype = np.float32).T
 
 # 这是专用orca的转换矩阵。相对于multiwfn提供的表格，orca的F+3和G+4轨道的相位是反着的。因此对于其他程序可能要把转移矩阵的后两列乘以-1
 F_convert = np.matrix([
@@ -34,7 +35,7 @@ F_convert = np.matrix([
     [ 0.00000000, 0.00000000, 1.09544511, 0.00000000, 0.00000000, 0.00000000, 0.00000000], #yzz
     [-0.67082039, 0.00000000, 0.00000000,-0.86602540, 0.00000000, 0.00000000, 0.00000000], #yyz
     [ 0.00000000, 0.00000000, 0.00000000, 0.00000000, 1.00000000, 0.00000000, 0.00000000], #xyz
-], dtype = np.float32)
+], dtype = np.float32).T
 G_convert = np.matrix([
     # G+0,G+1,G-1G+2,G-2,G+3,G-3,G+4,G-4, D+0, D+1, D-1, D+2, D-2, S
     [ 1.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000], #zzzz
@@ -52,7 +53,29 @@ G_convert = np.matrix([
     [ 0.00000000,-0.89642145, 0.00000000, 0.00000000, 0.00000000, 0.79056941, 0.00000000, 0.00000000, 0.00000000], #xxxz
     [ 0.00000000, 0.00000000, 0.00000000, 0.00000000,-0.42257712, 0.00000000, 0.00000000, 0.00000000,-1.11803398], #xxxy
     [ 0.37500000, 0.00000000, 0.00000000,-0.55901699, 0.00000000, 0.00000000, 0.00000000, 0.73950997, 0.00000000], #xxxx        
-], dtype = np.float32)
+], dtype = np.float32).T
+
+H_convert = np.eye(11, 21, dtype = np.float32)
+
+def build_reverse_matrix(M):
+    D = np.empty_like(M, dtype = np.float32)
+    D[:,:] = M
+    n_car, n_sph = D.shape[1], D.shape[0]
+    D = np.concatenate((D, np.random.random((n_car-n_sph, n_car)).astype(np.float32)), axis = 0)
+
+    for i in range(0, n_car - n_sph):
+        b = np.zeros(n_car, dtype = np.float32)
+        b[n_sph+i] = 1
+        v = np.linalg.solve(D, b)
+        v /= np.linalg.norm(v)
+        D[n_sph+i] = v
+
+    return D.I[:,:n_sph]
+
+D_inverse = build_reverse_matrix(D_convert)
+F_inverse = build_reverse_matrix(F_convert)
+G_inverse = build_reverse_matrix(G_convert)
+H_inverse = np.eye(21, 11, dtype = np.float32)
 
 class GTF:
     def __init__(self, p, c, a, i, j, k):
